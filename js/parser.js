@@ -30,6 +30,7 @@ export function normalizeRawText(text) {
 const PATTERN_A = /^([^\s:：「」（）()]{1,10})\s*[:：]\s*(.+)$/; // 役名：セリフ
 const PATTERN_B = /^([^\s「」（）()]{1,10})\s*「(.+)」\s*$/; // 役名「セリフ」
 const PATTERN_D = /^([^\t]{1,10})\t(.+)$/; // タブ区切り
+const PATTERN_E = /^([^\s:：「」（）()]{1,10})[ 　]+(\S.*)$/; // 役名(全角/半角スペース)セリフ — 縦書き台本の再構成後によく出る
 
 function levenshtein(a, b) {
   const m = a.length, n = b.length;
@@ -57,7 +58,7 @@ export function extractRoleCandidates(rawText) {
     if (!line) continue;
     if (HEADING_RE.test(line) || CUE_RE.test(line) || PAREN_FULL_RE.test(line)) continue;
 
-    let m = PATTERN_A.exec(line) || PATTERN_B.exec(line) || PATTERN_D.exec(line);
+    let m = PATTERN_A.exec(line) || PATTERN_B.exec(line) || PATTERN_D.exec(line) || PATTERN_E.exec(line);
     if (m) {
       const name = m[1].trim();
       if (name && !STOPWORDS.has(name)) {
@@ -114,14 +115,26 @@ function buildAliasLookup(confirmedRoles) {
   return entries;
 }
 
-function matchRolePrefix(lineNorm, lookup) {
+// Tries each known role/alias as a literal prefix of the line and figures out
+// where the dialogue body starts, if any. Unlike a plain normalized-prefix
+// check, this preserves internal whitespace so "役名 セリフ" (space-separated,
+// no punctuation — the standard format for vertically-typeset scripts once
+// reconstructed) is recognized alongside "役名：セリフ" / "役名「セリフ」" / tab-separated.
+// Returns { roleId, body } where body is null for a role-alone line (Pattern C).
+function matchRoleAndBody(line, lookup) {
+  const half = toHalfWidth(line);
   for (const { key, roleId } of lookup) {
-    if (lineNorm.startsWith(key)) {
-      const rest = lineNorm.slice(key.length);
-      if (rest === '' || /^[\s:：「\t]/.test(rest)) {
-        return { roleId, matchedLen: key.length };
-      }
-    }
+    if (!half.startsWith(key)) continue;
+    const rest = half.slice(key.length);
+    if (rest === '') return { roleId, body: null, matchedLen: key.length };
+    let m = /^[:：]\s*(.+)$/.exec(rest);
+    if (m) return { roleId, body: m[1].trim(), matchedLen: key.length };
+    m = /^「(.+)」\s*$/.exec(rest);
+    if (m) return { roleId, body: m[1].trim(), matchedLen: key.length };
+    m = /^\t(.+)$/.exec(rest);
+    if (m) return { roleId, body: m[1].trim(), matchedLen: key.length };
+    m = /^ +(\S.*)$/.exec(rest);
+    if (m) return { roleId, body: m[1].trim(), matchedLen: key.length };
   }
   return null;
 }
@@ -152,15 +165,6 @@ function extractInlineDirections(text) {
     ranges.push({ start: m.index, end: m.index + m[0].length });
   }
   return ranges;
-}
-
-function stripLeadingRoleMark(text) {
-  // "役名：セリフ" / "役名「セリフ」" / "役名\tセリフ" -> "セリフ"
-  let m = PATTERN_A.exec(text) || PATTERN_D.exec(text);
-  if (m) return m[2].trim();
-  m = /^[^「」（）()]{1,10}\s*「(.+)」\s*$/.exec(text);
-  if (m) return m[1].trim();
-  return text;
 }
 
 // pages: [{ text: string, pageNumber: number }]
@@ -197,38 +201,39 @@ export function classifyScript(pages, confirmedRoles) {
       } else if (CUE_RE.test(line)) {
         block = { type: 'cue', text: line, confidence: 0.9 };
       } else {
-        const norm = normalizeKey(line);
         const multi = matchMultiRolePrefix(line, lookup);
-        const single = !multi ? matchRolePrefix(norm, lookup) : null;
+        const single = !multi ? matchRoleAndBody(line, lookup) : null;
 
         if (multi) {
-          const bodyText = stripLeadingRoleMark(line) === line ? line.slice(multi.matchedLen).replace(/^[:：「\t]/, '').replace(/」\s*$/, '').trim() : stripLeadingRoleMark(line);
+          const afterHead = toHalfWidth(line).slice(multi.matchedLen);
+          const bodyText = (
+            /^[:：]\s*(.+)$/.exec(afterHead) ||
+            /^「(.+)」\s*$/.exec(afterHead) ||
+            /^\t(.+)$/.exec(afterHead) ||
+            /^ +(\S.*)$/.exec(afterHead)
+          )?.[1]?.trim() ?? afterHead.trim();
           block = { type: 'line', roleIds: multi.roleIds, text: bodyText, confidence: 0.9 };
+        } else if (single && single.body !== null) {
+          block = { type: 'line', roleIds: [single.roleId], text: single.body, confidence: 1.0 };
         } else if (single) {
-          const bodyOnLine = stripLeadingRoleMark(line);
-          if (bodyOnLine !== line) {
-            block = { type: 'line', roleIds: [single.roleId], text: bodyOnLine, confidence: 1.0 };
+          // Pattern C: role name alone on its line; body is following lines until blank/next role/heading
+          const bodyLines = [];
+          let j = i + 1;
+          let endOffset = srcEnd;
+          while (j < lines.length) {
+            const raw2 = lines[j];
+            const line2 = raw2.trim();
+            if (!line2) break;
+            if (HEADING_RE.test(line2) || CUE_RE.test(line2)) break;
+            if (matchRoleAndBody(line2, lookup) || matchMultiRolePrefix(line2, lookup)) break;
+            bodyLines.push(line2);
+            endOffset += raw2.length + 1;
+            j++;
+          }
+          if (bodyLines.length > 0) {
+            block = { type: 'line', roleIds: [single.roleId], text: bodyLines.join(''), confidence: 0.75, consumedLines: j - i - 1 };
           } else {
-            // Pattern C: role name alone on its line; body is following lines until blank/next role/heading
-            const bodyLines = [];
-            let j = i + 1;
-            let endOffset = srcEnd;
-            while (j < lines.length) {
-              const raw2 = lines[j];
-              const line2 = raw2.trim();
-              if (!line2) break;
-              const norm2 = normalizeKey(line2);
-              if (HEADING_RE.test(line2) || CUE_RE.test(line2)) break;
-              if (matchRolePrefix(norm2, lookup) || matchMultiRolePrefix(line2, lookup)) break;
-              bodyLines.push(line2);
-              endOffset += raw2.length + 1;
-              j++;
-            }
-            if (bodyLines.length > 0) {
-              block = { type: 'line', roleIds: [single.roleId], text: bodyLines.join(''), confidence: 0.75, consumedLines: j - i - 1 };
-            } else {
-              block = { type: 'unknown', text: line, confidence: 0 };
-            }
+            block = { type: 'unknown', text: line, confidence: 0 };
           }
         } else if (PAREN_FULL_RE.test(line)) {
           block = { type: 'direction', text: line, confidence: 0.8 };
@@ -243,6 +248,21 @@ export function classifyScript(pages, confirmedRoles) {
         let off = srcEnd;
         for (let k = 1; k <= consumed; k++) off += lines[i + k].length + 1;
         finalSrcEnd = off;
+      }
+
+      // A line that matches nothing is often not a new "unknown" thought but
+      // the tail of the previous line's text, split by a column/row wrap in
+      // the source PDF (typesetting, not a sentence boundary). Fold it back
+      // into the previous block instead of creating a stray fragment.
+      const prevBlock = blocks[blocks.length - 1];
+      if (block.type === 'unknown' && prevBlock && (prevBlock.type === 'line' || prevBlock.type === 'direction')) {
+        prevBlock.text += block.text;
+        prevBlock.srcEnd = finalSrcEnd;
+        if (prevBlock.type === 'line') prevBlock.inlineDirections = extractInlineDirections(prevBlock.text);
+        rawParts.push(raw);
+        i += 1 + consumed;
+        lineOffset = finalSrcEnd + 1;
+        continue;
       }
 
       blocks.push({

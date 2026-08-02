@@ -160,9 +160,9 @@ export async function renderImport(app) {
           throw new Error('文字を読み取れませんでした。画像だけのPDFの可能性があります。「文字を貼り付け」をお試しください。');
         }
         state.pages = pages;
-        state.castNames = extractCastList(pages);
-        const rawText = buildRawText(pages);
-        const { candidates, groups, hasCastList } = extractRoleCandidates(rawText, state.castNames);
+        const cast = extractCastList(pages);
+        state.castNames = cast.names;
+        const { candidates, groups, hasCastList } = extractRoleCandidates(pages, cast.names, { skipPages: cast.pages });
         state.candidates = candidates;
         state.groups = groups;
         state.hasCastList = hasCastList;

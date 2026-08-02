@@ -11,7 +11,7 @@ const TABS = [
   { id: 'settings', label: '設定' },
 ];
 
-export async function renderScriptDetail(app, scriptId, tab) {
+export async function renderScriptDetail(app, scriptId, tab, focusBlockId) {
   const script = await db.get('scripts', scriptId);
   if (!script) {
     app.appendChild(el('div', { class: 'page' }, '台本が見つかりませんでした'));
@@ -38,11 +38,17 @@ export async function renderScriptDetail(app, scriptId, tab) {
   page.appendChild(content);
 
   if (tab === 'appearances') await renderAppearancesTab(content, script, blocks, roles, myRoleIds);
-  else if (tab === 'view') renderViewTab(content, script, blocks, roleMap, myRoleIds);
+  else if (tab === 'view') renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId);
   else if (tab === 'notes') renderNotesTab(content, script, blocks);
   else renderSettingsTab(content, script, roles, blocks);
 
-  return () => {};
+  // Scroll to the line we came in for, after the router has done its own
+  // scroll-to-top for the new view.
+  const focusTimer = focusBlockId
+    ? setTimeout(() => document.getElementById('focus-block')?.scrollIntoView({ block: 'center' }), 0)
+    : null;
+
+  return () => { if (focusTimer) clearTimeout(focusTimer); };
 }
 
 async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
@@ -102,7 +108,7 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
   }
 }
 
-function renderViewTab(content, script, blocks, roleMap, myRoleIds) {
+function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId) {
   content.appendChild(el('p', { class: 'lead' },
     '台本の全文です。自分のセリフには左側に色の線が付いています。'));
   content.appendChild(el('p', { class: 'faint' },
@@ -115,6 +121,7 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds) {
 
   const list = renderBlockList(blocks, roleMap, {
     highlightRoleIds: myRoleIds,
+    focusBlockId,
     onSceneNoteClick: (heading) => { location.hash = `#/script/${encodeURIComponent(script.id)}/scene/${encodeURIComponent(heading.id)}`; },
   });
   content.appendChild(list);

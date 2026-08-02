@@ -38,15 +38,47 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
   const topbar = el('div', { class: 'topbar' }, [
     el('button', { class: 'back ghost', onclick: () => { location.hash = `#/script/${encodeURIComponent(scriptId)}/appearances`; } }, '←'),
     el('h1', {}, appearance.label),
+    el('button', { class: 'ghost small', onclick: () => { mode = mode === 'quiz' ? 'whole' : 'quiz'; renderMode(); } }, '通し表示'),
   ]);
   app.appendChild(topbar);
 
   const shell = el('div', { class: 'practice-shell' });
   const contextArea = el('div', { class: 'practice-context' });
   const targetArea = el('div', { class: 'practice-target' });
+  const wholeArea = el('div', { class: 'page', style: 'display:none' });
   shell.appendChild(contextArea);
   shell.appendChild(targetArea);
+  shell.appendChild(wholeArea);
   app.appendChild(shell);
+
+  let mode = 'quiz';
+
+  function renderMode() {
+    const quiz = mode === 'quiz';
+    contextArea.style.display = quiz ? '' : 'none';
+    targetArea.style.display = quiz ? '' : 'none';
+    wholeArea.style.display = quiz ? 'none' : '';
+    topbar.lastChild.textContent = quiz ? '通し表示' : '一問ずつ';
+    if (!quiz) renderWhole();
+  }
+
+  // The whole passage in order, with only my own lines hidden — so a line can
+  // be placed in the flow of the scene rather than answered in isolation.
+  function renderWhole() {
+    wholeArea.innerHTML = '';
+    wholeArea.appendChild(el('p', { class: 'faint' },
+      'この出番の全文です。自分のセリフだけ伏せてあります。伏せ字をタップすると、その1本だけ開きます。'));
+    wholeArea.appendChild(el('div', { class: 'row', style: 'margin-bottom:12px' }, [
+      el('button', { onclick: () => wholeArea.querySelectorAll('.masked').forEach((n) => n.click()) }, 'すべて開く'),
+      el('button', { onclick: renderWhole }, 'すべて伏せる'),
+    ]));
+
+    const list = renderBlockList(rangeBlocks, roleMap, {
+      highlightRoleIds: myRoleIds,
+      maskRoleIds: myRoleIds,
+    });
+    wholeArea.appendChild(list);
+  }
 
   let cursor = 0;
   let contextBlocks = [];
@@ -107,9 +139,21 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
       step();
     }
 
-    targetArea.appendChild(el('div', { class: 'role-name', style: 'margin-bottom:6px' }, [
-      el('span', { class: 'dot', style: `background:${roleMap.get(block.roleIds[0])?.color || '#888'}` }),
-      roleNames,
+    const myTotal = rangeBlocks.filter(isMine).length;
+    const myDone = rangeBlocks.slice(0, cursor).filter(isMine).length;
+
+    targetArea.appendChild(el('div', { class: 'spread', style: 'margin-bottom:6px' }, [
+      el('div', { class: 'role-name', style: 'margin:0' }, [
+        el('span', { class: 'dot', style: `background:${roleMap.get(block.roleIds[0])?.color || '#888'}` }),
+        roleNames,
+      ]),
+      el('div', { class: 'row', style: 'gap:6px' }, [
+        el('span', { class: 'faint' }, `p.${block.page} ・ ${myDone + 1}/${myTotal}`),
+        el('button', {
+          class: 'ghost small',
+          onclick: () => { location.hash = `#/script/${encodeURIComponent(scriptId)}/view/${encodeURIComponent(block.id)}`; },
+        }, '台本で見る'),
+      ]),
     ]));
     targetArea.appendChild(textEl);
     targetArea.appendChild(hintRow);
@@ -136,5 +180,6 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
   }
 
   step();
+  renderMode();
   return () => {};
 }

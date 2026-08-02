@@ -1,12 +1,18 @@
 // Rule-based script parser: normalization, role candidate extraction, block classification.
 // No network calls — the script text never leaves the device.
 
+// Only words that structure the document itself. Speaker labels like ナレ or
+// 一同 are left in: whether they are real roles is settled by the cast list,
+// not by a hardcoded list of names.
 const STOPWORDS = new Set([
   'そして', 'しかし', 'だが', 'それで', 'つまり', 'また', 'さて', 'では', 'ところで',
-  'ナレーション', 'ナレ', 'ト書き', 'キャスト', '登場人物', '目次', 'あらすじ', '幕間',
+  'ト書き', 'キャスト', '登場人物', '目次', 'あらすじ', '幕間',
 ]);
 
-const HEADING_RE = /^\s*(第[一二三四五六七八九十0-90-9]+[場幕話幕場]|シーン\s*\d+|[○◯]{1,2}\s*\S*|\*{2,}|─{3,}|-{4,}|＝{4,})/;
+const DIGITS = '0-9０-９一二三四五六七八九十';
+const HEADING_RE = new RegExp(
+  `^\\s*(第[${DIGITS}]+[場幕話]|シーン\\s*[${DIGITS}]+|[○◯]{1,2}\\s*\\S*|\\*{2,}|─{3,}|-{4,}|＝{4,})`
+);
 const CUE_RE = /^\s*(M[-‐ー]?\s*\d+|SE\d*|ＳＥ\d*|BGM|暗転|明転|溶暗|場転|F\.?O\.?|F\.?I\.?)\b/i;
 const PAREN_FULL_RE = /^[（(].*[）)]\s*$/;
 const INLINE_PAREN_RE = /[（(][^（）()]{1,40}[）)]/g;
@@ -61,8 +67,12 @@ function splitCastEntry(line) {
 }
 
 // pages: [{ text, pageNumber }] — only the front matter is searched.
+// Returns { names, pages } where `pages` are the page numbers the list spans;
+// those pages are front matter, not dialogue, so callers skip them when
+// scanning for speakers.
 export function extractCastList(pages) {
   const names = [];
+  const castPages = new Set();
   let collecting = false;
   let scanned = 0;
 
@@ -71,7 +81,7 @@ export function extractCastList(pages) {
     for (const raw of page.text.split('\n')) {
       const line = raw.trim();
       if (!collecting) {
-        if (CAST_HEADING_RE.test(line)) collecting = true;
+        if (CAST_HEADING_RE.test(line)) { collecting = true; castPages.add(page.pageNumber); }
         continue;
       }
       if (++scanned > 200) break outer;
@@ -79,10 +89,11 @@ export function extractCastList(pages) {
       // The list ends where the play itself begins.
       if (HEADING_RE.test(line) || CUE_RE.test(line)) break outer;
       if ([...line].length > 30 || /[。！？]/.test(line)) break outer;
+      castPages.add(page.pageNumber);
       names.push(...splitCastEntry(line));
     }
   }
-  return [...new Set(names)];
+  return { names: [...new Set(names)], pages: [...castPages] };
 }
 
 // Characters of `key` appear in `text` in order, but not necessarily adjacent.
@@ -142,10 +153,33 @@ function levenshtein(a, b) {
   return dp[m][n];
 }
 
+// Which lines on a page may introduce a speaker.
+//
+// Scripts put the role name at the margin and indent everything that belongs
+// under it — wrapped dialogue, stage directions. So when a page carries indent
+// information, only outdented lines are allowed to name a role. That single
+// rule removes the whole class of false speakers that no amount of wording
+// analysis can settle: the first words of a wrapped line or of a song lyric
+// look exactly like a role name followed by dialogue, and differ only in where
+// they sit on the page.
+function speakerLines(pages) {
+  const out = [];
+  for (const page of pages) {
+    const lines = page.lines || page.text.split('\n').map((text) => ({ text }));
+    for (const line of lines) {
+      out.push({ text: line.text, canNameRole: !line.isContinuation, page: page.pageNumber });
+    }
+  }
+  return out;
+}
+
 // Returns { candidates, groups, castNames, hasCastList }
 // Each candidate: { name, count, defaultInclude, inCast, castName }
-export function extractRoleCandidates(rawText, castNames = []) {
-  const lines = rawText.split('\n');
+export function extractRoleCandidates(pages, castNames = [], options = {}) {
+  const skipPages = new Set(options.skipPages || []);
+  const lines = speakerLines(pages)
+    .filter((l) => l.canNameRole && !skipPages.has(l.page))
+    .map((l) => l.text);
   const hasCastList = castNames.length >= 2;
   // Each candidate tracks two kinds of evidence separately: "strong" comes from
   // an explicit delimiter (colon / brackets / tab — a deliberate role marker),
@@ -277,6 +311,10 @@ function matchRoleAndBody(line, lookup) {
     if (m) return { roleId, body: m[1].trim(), matchedLen: key.length };
     m = /^ +(\S.*)$/.exec(rest);
     if (m) return { roleId, body: m[1].trim(), matchedLen: key.length };
+    // "太郎…… はい" — an opening pause typeset tight against the role name.
+    // The ellipsis is part of the speech, not of the name.
+    m = /^([…‥]+) *(.*)$/.exec(rest);
+    if (m) return { roleId, body: (m[1] + m[2]).trim(), matchedLen: key.length };
   }
   return null;
 }
@@ -319,8 +357,18 @@ export function classifyScript(pages, confirmedRoles) {
   const rawParts = [];
 
   for (const page of pages) {
-    const pageText = page.text;
-    const lines = pageText.split('\n');
+    const pageLines = page.lines || page.text.split('\n').map((text) => ({ text }));
+    const lines = pageLines.map((l) => l.text);
+    // A line beginning at the dialogue column continues the line above it; one
+    // at the margin starts a new speech. Sources without layout information
+    // (pasted text) mark nothing, and fall back to reading the wording alone.
+    const continuesPrevious = (idx) => pageLines[idx].lineRole === 'continuation';
+    const canStartSpeech = (idx) => pageLines[idx].lineRole !== 'continuation';
+    // Set in from the margin but short of the dialogue column: a stage
+    // direction, which belongs to nobody and must not be folded into the
+    // speech above it.
+    const isStageDirection = (idx) => pageLines[idx].lineRole === 'indented';
+
     let i = 0;
     let lineOffset = cursor;
 
@@ -338,13 +386,17 @@ export function classifyScript(pages, confirmedRoles) {
 
       let block = null;
 
-      if (HEADING_RE.test(line)) {
+      if (continuesPrevious(i)) {
+        block = { type: 'unknown', text: line, confidence: 0, isContinuation: true };
+      } else if (isStageDirection(i) && !HEADING_RE.test(line) && !CUE_RE.test(line)) {
+        block = { type: 'direction', text: line, confidence: 0.85 };
+      } else if (HEADING_RE.test(line)) {
         block = { type: 'heading', text: line, confidence: 0.9 };
       } else if (CUE_RE.test(line)) {
         block = { type: 'cue', text: line, confidence: 0.9 };
       } else {
-        const multi = matchMultiRolePrefix(line, lookup);
-        const single = !multi ? matchRoleAndBody(line, lookup) : null;
+        const multi = canStartSpeech(i) ? matchMultiRolePrefix(line, lookup) : null;
+        const single = !multi && canStartSpeech(i) ? matchRoleAndBody(line, lookup) : null;
 
         if (multi) {
           const afterHead = toHalfWidth(line).slice(multi.matchedLen);
@@ -367,7 +419,7 @@ export function classifyScript(pages, confirmedRoles) {
             const line2 = raw2.trim();
             if (!line2) break;
             if (HEADING_RE.test(line2) || CUE_RE.test(line2)) break;
-            if (matchRoleAndBody(line2, lookup) || matchMultiRolePrefix(line2, lookup)) break;
+            if (canStartSpeech(j) && (matchRoleAndBody(line2, lookup) || matchMultiRolePrefix(line2, lookup))) break;
             bodyLines.push(line2);
             endOffset += raw2.length + 1;
             j++;

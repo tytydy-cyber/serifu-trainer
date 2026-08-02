@@ -138,6 +138,18 @@ export async function renderPracticeVoice(app, scriptId, appearanceIndex) {
       const contentEl = el('div', { class: 'content' }, '・・・');
       stage.appendChild(contentEl);
       stage.appendChild(el('div', { class: 'faint' }, 'セリフを言ってみましょう。タップで答えを表示します。'));
+      stage.appendChild(el('div', { class: 'row', style: 'gap:8px;justify-content:center' }, [
+        el('span', { class: 'faint' }, `p.${block.page}`),
+        el('button', {
+          class: 'ghost small',
+          onclick: (e) => {
+            e.stopPropagation();
+            stopped = true;
+            engine.cancel();
+            location.hash = `#/script/${encodeURIComponent(scriptId)}/view/${encodeURIComponent(block.id)}`;
+          },
+        }, '台本で見る'),
+      ]));
 
       let revealed = false;
       const reveal = async () => {

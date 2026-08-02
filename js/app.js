@@ -37,7 +37,9 @@ async function route() {
       } else if (parts[2] === 'practice' && parts[3] === 'voice' && parts[4] !== undefined) {
         currentCleanup = await renderPracticeVoice(app, scriptId, Number(parts[4]));
       } else {
-        currentCleanup = await renderScriptDetail(app, scriptId, parts[2] || 'appearances');
+        // #/script/{id}/view/{blockId} — open the script scrolled to one line.
+        const focusBlockId = parts[3] ? decodeURIComponent(parts[3]) : null;
+        currentCleanup = await renderScriptDetail(app, scriptId, parts[2] || 'appearances', focusBlockId);
       }
     } else {
       app.appendChild(document.createTextNode('ページが見つかりません'));

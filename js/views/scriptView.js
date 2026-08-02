@@ -1,9 +1,17 @@
 import { el, escapeHtml } from '../ui.js';
 
 // Renders the full script as a scrollable block list.
-// options: { highlightRoleIds: Set, onSceneNoteClick: (headingBlock) => void, rangeStart, rangeEnd, hideOthers }
+// options:
+//   highlightRoleIds  Set — mark these roles' lines as the reader's own
+//   maskRoleIds       Set — hide these roles' lines until tapped
+//   focusBlockId      string — scroll to this block and mark it
+//   onSceneNoteClick  (headingBlock) => void
+//   rangeStart/rangeEnd — restrict to a range of block orders
 export function renderBlockList(blocks, roleMap, options = {}) {
-  const { highlightRoleIds = new Set(), onSceneNoteClick, rangeStart, rangeEnd } = options;
+  const {
+    highlightRoleIds = new Set(), maskRoleIds, focusBlockId,
+    onSceneNoteClick, rangeStart, rangeEnd,
+  } = options;
   const list = el('div', { class: 'block-list' });
   let lastPage = null;
 
@@ -33,15 +41,33 @@ export function renderBlockList(blocks, roleMap, options = {}) {
     }
     if (b.type === 'line') {
       const isMine = b.roleIds && b.roleIds.some((r) => highlightRoleIds.has(r));
+      const shouldMask = maskRoleIds && b.roleIds && b.roleIds.some((r) => maskRoleIds.has(r));
       const roleNames = (b.roleIds || []).map((rid) => roleMap.get(rid)?.name || '?').join('・');
       const roleColor = b.roleIds && roleMap.get(b.roleIds[0]) ? roleMap.get(b.roleIds[0]).color : '#888';
-      list.appendChild(el('div', { class: `block line ${isMine ? 'mine' : ''}` }, [
+      const isFocus = focusBlockId && b.id === focusBlockId;
+
+      const body = shouldMask
+        ? el('div', {
+            class: 'masked',
+            title: 'タップして開く',
+            onclick: (e) => {
+              const node = e.currentTarget;
+              node.classList.remove('masked');
+              node.textContent = '';
+              node.appendChild(renderLineText(b));
+            },
+          }, '█'.repeat(Math.min(20, Math.max(4, Math.ceil([...b.text].length * 0.7)))))
+        : el('div', {}, renderLineText(b));
+
+      const node = el('div', { class: `block line ${isMine ? 'mine' : ''} ${isFocus ? 'focus' : ''}` }, [
         el('div', { class: 'role-name' }, [
           el('span', { class: 'dot', style: `background:${roleColor}` }),
           roleNames || '（役未設定）',
         ]),
-        el('div', {}, renderLineText(b)),
-      ]));
+        body,
+      ]);
+      if (isFocus) node.id = 'focus-block';
+      list.appendChild(node);
       continue;
     }
     // unknown

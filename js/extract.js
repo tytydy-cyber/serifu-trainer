@@ -3,11 +3,25 @@ import { normalizeRawText } from './parser.js';
 
 // All extraction happens on-device; nothing is uploaded anywhere.
 
+// Plain text carries its indentation literally, so measure it in leading
+// whitespace instead of coordinates and hand the parser the same shape the
+// PDF path produces.
+function linesFromPlainText(text) {
+  return text.split('\n').map((raw) => {
+    const leading = /^[ 　\t]*/.exec(raw)[0];
+    const width = [...leading].reduce((n, ch) => n + (ch === '\t' ? 4 : ch === '　' ? 2 : 1), 0);
+    return { text: raw.trim(), indent: Math.floor(width / 2) };
+  });
+}
+
 export function extractFromPlainText(text) {
   const normalized = normalizeRawText(text);
   const rawPages = normalized.split('\f').map((t) => t.trim()).filter(Boolean);
-  const pages = (rawPages.length ? rawPages : [normalized]).map((t, i) => ({ text: t, pageNumber: i + 1 }));
-  return pages;
+  return (rawPages.length ? rawPages : [normalized]).map((t, i) => ({
+    text: t,
+    pageNumber: i + 1,
+    lines: linesFromPlainText(t),
+  }));
 }
 
 export async function extractFromTxtFile(file) {
@@ -50,21 +64,45 @@ function modeHeight(items) {
   return best;
 }
 
-function reconstructPageText(rawItems) {
+// Returns { lines: [{ text, start, vertical }], baseSize } for one page.
+// `start` is where the line begins along the axis the text is indented on
+// (y for vertical writing, x for horizontal) — the raw coordinate, turned into
+// an indent level later once the whole document's margins are known.
+function reconstructPageLines(rawItems) {
   const items = rawItems
     .filter((it) => it.str && it.str.length > 0)
     .map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], height: it.height }));
-  if (items.length === 0) return '';
+  if (items.length === 0) return { lines: [], baseSize: 12 };
 
   const baseSize = modeHeight(items) || 12;
   // Ruby/furigana glyphs are set noticeably smaller than the body text they annotate.
   const main = items.filter((it) => !it.height || it.height >= baseSize * 0.65);
+  if (main.length === 0) return { lines: [], baseSize };
 
-  let out = '';
+  const lines = [];
+  let cur = null;
   let prev = null;
+  let verticalVotes = 0;
+  let horizontalVotes = 0;
+
+  // Keep both axes and pick between them once the document's writing direction
+  // is known. A line cannot decide its own orientation reliably — a page whose
+  // running header is set horizontally over vertical body text would otherwise
+  // hand the first body line the header's orientation.
+  const startLine = (it) => {
+    cur = { text: it.str, startX: it.x, startY: it.y, bodyX: null, bodyY: null };
+    lines.push(cur);
+  };
+  const noteGap = (it) => {
+    // Where the text after the line's first gap begins. On a role-name line
+    // this is where the dialogue column starts, which is also where wrapped
+    // dialogue begins — giving us that landmark directly instead of inferring it.
+    if (cur.bodyX === null) { cur.bodyX = it.x; cur.bodyY = it.y; }
+  };
+
   for (const it of main) {
     if (!prev) {
-      out += it.str;
+      startLine(it);
       prev = it;
       continue;
     }
@@ -75,32 +113,98 @@ function reconstructPageText(rawItems) {
     const sameRow = Math.abs(dy) < pitch * 0.4 && dx > 0;
 
     if (sameColumn) {
-      if (-dy - pitch > pitch * 0.5) out += ' ';
-      out += it.str;
+      verticalVotes++;
+      // A gap wider than the character pitch is a deliberate separation — this
+      // is the indent that sits between a role name and its dialogue.
+      if (-dy - pitch > pitch * 0.5) { cur.text += ' '; noteGap(it); }
+      cur.text += it.str;
     } else if (sameRow) {
-      if (dx - pitch > pitch * 0.6) out += ' ';
-      out += it.str;
+      horizontalVotes++;
+      if (dx - pitch > pitch * 0.6) { cur.text += ' '; noteGap(it); }
+      cur.text += it.str;
     } else {
-      out += '\n' + it.str;
+      startLine(it);
     }
     prev = it;
   }
-  return out;
+
+  return { lines, baseSize, verticalVotes, horizontalVotes };
+}
+
+// Japanese scripts indent the parts of a page by what they are: the role name
+// sits at the margin, and everything belonging under it is pulled in — stage
+// directions a little, dialogue wrapping onto the next line as far as the
+// dialogue column. That layout is the clearest evidence of what a line *is*,
+// and it survives in the PDF as the coordinate each line starts at.
+//
+// Rather than trying to recover margins by clustering coordinates — which
+// breaks down as soon as a page holds several text blocks with their own
+// margins, or a stray line lands between them — use a landmark we can read
+// off directly. On a role-name line the gap after the name lands exactly on
+// the dialogue column, and that is the same position wrapped dialogue starts
+// at. So collect those positions, keep the ones that recur, and a line
+// continues the previous one precisely when it begins at one of them.
+function markLineRoles(allLines, baseSize, vertical) {
+  if (allLines.length === 0) return;
+  const startOf = (l) => (vertical ? l.startY : l.startX);
+  const bodyOf = (l) => (vertical ? l.bodyY : l.bodyX);
+  // Distance from the dialogue column back towards the margin, as a positive
+  // number regardless of which way the script is set.
+  const towardsMargin = (from, column) => (vertical ? from - column : column - from);
+
+  const bodyCounts = new Map();
+  for (const line of allLines) {
+    if (bodyOf(line) === null) continue;
+    const key = Math.round(bodyOf(line));
+    bodyCounts.set(key, (bodyCounts.get(key) || 0) + 1);
+  }
+  // A real dialogue column recurs on page after page; a one-off gap does not.
+  const minHits = Math.max(3, allLines.length * 0.02);
+  const columns = [...bodyCounts.entries()]
+    .filter(([, count]) => count >= minHits)
+    .map(([coord]) => coord);
+
+  if (columns.length === 0) {
+    for (const line of allLines) line.lineRole = 'margin';
+    return;
+  }
+
+  // How far the margin sits from the dialogue column — i.e. the width of the
+  // role-name field. Measured from the role lines themselves, where both
+  // positions are known, so it needs no assumption about the page layout.
+  const offsets = allLines
+    .filter((l) => bodyOf(l) !== null)
+    .map((l) => towardsMargin(startOf(l), bodyOf(l)))
+    .filter((v) => v > 0)
+    .sort((a, b) => a - b);
+  const marginOffset = offsets[Math.floor(offsets.length / 2)] || baseSize;
+
+  const tolerance = baseSize * 0.5;
+  for (const line of allLines) {
+    const start = startOf(line);
+    // Compare against whichever dialogue column this line sits nearest, so a
+    // page holding several blocks of text needs no special handling.
+    const column = columns.reduce(
+      (best, c) => (Math.abs(start - c) < Math.abs(start - best) ? c : best),
+      columns[0]
+    );
+    const rel = towardsMargin(start, column);
+    if (Math.abs(rel) <= tolerance) line.lineRole = 'continuation';
+    else if (Math.abs(rel - marginOffset) <= tolerance) line.lineRole = 'margin';
+    else line.lineRole = rel > 0 ? 'indented' : 'continuation';
+    line.isContinuation = line.lineRole === 'continuation';
+  }
 }
 
 // Strips a running header/footer (title + changing page number) repeated on
 // most pages, which would otherwise show up as a bogus "unknown" block on
 // every single page in the manual-fix step.
 function stripRunningHeaders(pages) {
-  const firstLine = (text) => {
-    const idx = text.indexOf('\n');
-    return idx === -1 ? text : text.slice(0, idx);
-  };
   const withoutTrailingNumber = (line) => line.replace(/[0-9０-９\s]+$/, '').trim();
 
   const counts = new Map();
   for (const p of pages) {
-    const key = withoutTrailingNumber(firstLine(p.text));
+    const key = withoutTrailingNumber(p.lines[0]?.text || '');
     if (key.length >= 3) counts.set(key, (counts.get(key) || 0) + 1);
   }
   let headerKey = null;
@@ -110,13 +214,15 @@ function stripRunningHeaders(pages) {
   if (!headerKey) return pages;
 
   return pages.map((p) => {
-    const idx = p.text.indexOf('\n');
-    const first = idx === -1 ? p.text : p.text.slice(0, idx);
-    if (withoutTrailingNumber(first) === headerKey) {
-      return { ...p, text: idx === -1 ? '' : p.text.slice(idx + 1) };
+    if (p.lines.length && withoutTrailingNumber(p.lines[0].text) === headerKey) {
+      return { ...p, lines: p.lines.slice(1) };
     }
     return p;
   });
+}
+
+function withText(page) {
+  return { ...page, text: normalizeRawText(page.lines.map((l) => l.text).join('\n')) };
 }
 
 export async function extractFromPdfFile(file, onProgress) {
@@ -127,16 +233,29 @@ export async function extractFromPdfFile(file, onProgress) {
   const buf = await file.arrayBuffer();
   const doc = await pdfjsLib.getDocument({ data: buf }).promise;
   const pages = [];
+  const allLines = [];
+  const sizeVotes = [];
+  let vertical = 0;
+  let horizontal = 0;
 
   for (let i = 1; i <= doc.numPages; i++) {
     if (onProgress) onProgress(i, doc.numPages);
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
-    const pageText = reconstructPageText(content.items);
-    pages.push({ text: normalizeRawText(pageText), pageNumber: i });
+    const { lines, baseSize: size, verticalVotes, horizontalVotes } = reconstructPageLines(content.items);
+    // The title page is set in display sizes, so take the body size from the
+    // document as a whole rather than from whichever page happens to be first.
+    sizeVotes.push(size);
+    vertical += verticalVotes;
+    horizontal += horizontalVotes;
+    allLines.push(...lines);
+    pages.push({ pageNumber: i, lines });
   }
 
-  return stripRunningHeaders(pages);
+  sizeVotes.sort((a, b) => a - b);
+  const baseSize = sizeVotes[Math.floor(sizeVotes.length / 2)] || 12;
+  markLineRoles(allLines, baseSize, vertical >= horizontal);
+  return stripRunningHeaders(pages).map(withText);
 }
 
 export async function extractFromFile(file, onProgress) {

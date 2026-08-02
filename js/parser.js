@@ -30,7 +30,101 @@ export function normalizeRawText(text) {
 const PATTERN_A = /^([^\s:：「」（）()]{1,10})\s*[:：]\s*(.+)$/; // 役名：セリフ
 const PATTERN_B = /^([^\s「」（）()]{1,10})\s*「(.+)」\s*$/; // 役名「セリフ」
 const PATTERN_D = /^([^\t]{1,10})\t(.+)$/; // タブ区切り
-const PATTERN_E = /^([^\s:：「」（）()]{1,10})[ 　]+(\S.*)$/; // 役名(全角/半角スペース)セリフ — 縦書き台本の再構成後によく出る
+// 役名(全角/半角スペース)セリフ。コロンや鉤括弧のような明示的な区切りがないぶん、
+// 本文中の普通の一文の先頭語にも当たってしまう。話者名として現実的な長さで頭打ちにする。
+const PATTERN_E = /^([^\s:：「」（）()]{1,8})[ 　]+(\S.*)$/;
+// 歌詞は音符記号で始まり、譜割りのための空白が頻繁に入るため PATTERN_E が
+// フレーズの先頭語を話者名と誤認しやすい。
+const LYRIC_RE = /[♪♫♬]/;
+
+// --- Cast list (登場人物表) -----------------------------------------------
+// Most scripts open with a cast list. When we can find one it is far more
+// reliable than any frequency heuristic: it tells us the real set of roles,
+// so anything the body scan turns up that is absent from it can be surfaced
+// to the user as suspicious rather than silently accepted.
+
+const CAST_HEADING_RE = /^[\s　]*(登場人物表|登場人物|人物表|人物|配役|役名|キャスト|出演者|出演)[\s　]*[：:]?[\s　]*$/;
+
+function splitCastEntry(line) {
+  const cleaned = line
+    .replace(/[（(][^）)]*[）)]/g, '')   // 年齢・補足の括弧書き
+    .replace(/[…‥]{1,}.*$/, '')          // 「太郎……30歳、会社員」
+    .replace(/\t.*$/, '')                 // 俳優名が別カラムにある場合
+    .replace(/[ 　]{2,}.*$/, '')          // 同上（スペース揃え）
+    .trim();
+  if (!cleaned) return [];
+  // 「A／B」は一人二役の表記なのでどちらも役名として拾う
+  return cleaned
+    .split(/[／\/・、,]/)
+    .map((s) => s.trim())
+    .filter((s) => s && [...s].length <= 20);
+}
+
+// pages: [{ text, pageNumber }] — only the front matter is searched.
+export function extractCastList(pages) {
+  const names = [];
+  let collecting = false;
+  let scanned = 0;
+
+  outer:
+  for (const page of pages.slice(0, 3)) {
+    for (const raw of page.text.split('\n')) {
+      const line = raw.trim();
+      if (!collecting) {
+        if (CAST_HEADING_RE.test(line)) collecting = true;
+        continue;
+      }
+      if (++scanned > 200) break outer;
+      if (!line) continue;
+      // The list ends where the play itself begins.
+      if (HEADING_RE.test(line) || CUE_RE.test(line)) break outer;
+      if ([...line].length > 30 || /[。！？]/.test(line)) break outer;
+      names.push(...splitCastEntry(line));
+    }
+  }
+  return [...new Set(names)];
+}
+
+// Characters of `key` appear in `text` in order, but not necessarily adjacent.
+function isSubsequence(key, text) {
+  let i = 0;
+  for (const ch of text) {
+    if (ch === key[i]) i++;
+    if (i === key.length) return true;
+  }
+  return i === key.length;
+}
+
+// Body text abbreviates cast entries constantly, and in two different ways:
+// by taking a contiguous piece (麺太郎 for 松本麺太郎, 父 for 麺太郎の父) or by
+// picking characters out of the full name (さお男 for さおだけ屋の男, ジャ母 for
+// ジャイアン太郎の母). Try contiguous first since it is the stronger reading,
+// then fall back to an in-order subsequence. The shortest match wins, being
+// the most specific. Returns the matched cast entry, or null.
+function findCastMatch(name, castNames) {
+  const key = normalizeKey(name);
+  if (!key) return null;
+  const keys = castNames
+    .map((cast) => ({ cast, castKey: normalizeKey(cast) }))
+    .filter((e) => e.castKey);
+
+  for (const { cast, castKey } of keys) {
+    if (castKey === key) return cast;
+  }
+  let best = null;
+  for (const { cast, castKey } of keys) {
+    if (castKey.includes(key) && (!best || castKey.length < normalizeKey(best).length)) best = cast;
+  }
+  if (best) return best;
+  // Subsequence matching is loose, so require a real abbreviation: at least two
+  // characters, and a cast entry not wildly longer than the abbreviation.
+  if (key.length < 2) return null;
+  for (const { cast, castKey } of keys) {
+    if (castKey.length > key.length * 5) continue;
+    if (isSubsequence(key, castKey) && (!best || castKey.length < normalizeKey(best).length)) best = cast;
+  }
+  return best;
+}
 
 function levenshtein(a, b) {
   const m = a.length, n = b.length;
@@ -48,36 +142,76 @@ function levenshtein(a, b) {
   return dp[m][n];
 }
 
-// Returns { candidates: [{name, count}], groups: [[name,...]] }
-export function extractRoleCandidates(rawText) {
+// Returns { candidates, groups, castNames, hasCastList }
+// Each candidate: { name, count, defaultInclude, inCast, castName }
+export function extractRoleCandidates(rawText, castNames = []) {
   const lines = rawText.split('\n');
+  const hasCastList = castNames.length >= 2;
+  // Each candidate tracks two kinds of evidence separately: "strong" comes from
+  // an explicit delimiter (colon / brackets / tab — a deliberate role marker),
+  // "weak" comes from the bare-space pattern or a standalone short line, which
+  // has no explicit marker and can coincidentally match a line's first word
+  // (a lyric phrase, an emphasis pause, ...). Weak-only candidates need more
+  // repetition before we default them to "included" in the wizard.
   const counts = new Map();
+  const bump = (rawName, kind) => {
+    // Ellipses and stray separators cling to the speaker label when a script
+    // writes "太郎……" for a pause; fold those into the plain name.
+    const name = rawName.replace(/^[…‥・\s]+|[…‥・\s]+$/g, '');
+    if (!name || STOPWORDS.has(name)) return;
+    const entry = counts.get(name) || { strong: 0, weak: 0 };
+    entry[kind] += 1;
+    counts.set(name, entry);
+  };
 
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
-    if (HEADING_RE.test(line) || CUE_RE.test(line) || PAREN_FULL_RE.test(line)) continue;
+    if (HEADING_RE.test(line) || CUE_RE.test(line) || PAREN_FULL_RE.test(line) || LYRIC_RE.test(line)) continue;
 
-    let m = PATTERN_A.exec(line) || PATTERN_B.exec(line) || PATTERN_D.exec(line) || PATTERN_E.exec(line);
+    let m = PATTERN_A.exec(line) || PATTERN_B.exec(line) || PATTERN_D.exec(line);
     if (m) {
-      const name = m[1].trim();
-      if (name && !STOPWORDS.has(name)) {
-        counts.set(name, (counts.get(name) || 0) + 1);
-      }
+      bump(m[1].trim(), 'strong');
+      continue;
+    }
+    m = PATTERN_E.exec(line);
+    if (m) {
+      bump(m[1].trim(), 'weak');
       continue;
     }
     // Pattern C candidate: a short standalone line (role-only line style)
     if (line.length <= 10 && !/[。、！？.!?]/.test(line)) {
-      counts.set(line, (counts.get(line) || 0) + 0.5); // weighted lower — confirmed by co-occurrence with A/B/D
+      bump(line, 'weak');
     }
   }
 
   const candidates = [...counts.entries()]
-    .filter(([name, count]) => count >= 1.5 && !STOPWORDS.has(name))
-    .map(([name, count]) => ({ name, count: Math.round(count * 10) / 10 }))
+    .map(([name, { strong, weak }]) => ({ name, strong, weak, count: strong + weak }))
+    .filter((c) => c.count >= 2)
+    .map((c) => {
+      const castName = hasCastList ? findCastMatch(c.name, castNames) : null;
+      const inCast = !!castName;
+      // With a cast list, membership is the deciding signal. Without one, fall
+      // back to evidence quality: an explicit delimiter (colon/brackets/tab) is
+      // a deliberate role marker and trustworthy at low counts, while the
+      // space-separated form has to repeat before we believe it.
+      let defaultInclude = hasCastList
+        ? (inCast || c.strong >= 3)
+        : (c.strong >= 2 || c.weak >= 5);
+      // A one-character candidate matches far too easily (any stray particle
+      // sits inside some cast entry), so require real recurrence on top.
+      if ([...c.name].length <= 1 && c.count < (inCast ? 5 : 10)) defaultInclude = false;
+      return {
+        name: c.name,
+        count: Math.round(c.count * 10) / 10,
+        defaultInclude,
+        inCast,
+        castName,
+      };
+    })
     .sort((a, b) => b.count - a.count);
 
-  // Suggest alias groups: names within edit distance 1, or containment (男 ⊂ 男A)
+  // Suggest which candidates are the same role written two ways.
   const groups = [];
   const used = new Set();
   for (let i = 0; i < candidates.length; i++) {
@@ -86,18 +220,26 @@ export function extractRoleCandidates(rawText) {
     used.add(candidates[i].name);
     for (let j = i + 1; j < candidates.length; j++) {
       if (used.has(candidates[j].name)) continue;
-      const a = candidates[i].name, b = candidates[j].name;
-      const contained = a.includes(b) || b.includes(a);
-      const close = levenshtein(a, b) <= 1 && Math.max(a.length, b.length) > 1;
-      if (contained || close) {
-        group.push(candidates[j].name);
-        used.add(b);
+      const a = candidates[i], b = candidates[j];
+      const contained = a.name.includes(b.name) || b.name.includes(a.name);
+      const close = levenshtein(a.name, b.name) <= 1 && Math.max(a.name.length, b.name.length) > 1;
+      const looksAlike = contained || close;
+      // Looking alike is necessary but not sufficient: ジャイ and ジャ母 look
+      // alike yet are ジャイアン太郎 and ジャイアン太郎の母. Conversely two names
+      // can share a cast entry without being the same role, since an entry like
+      // 麺太郎の父 contains both 麺太郎 and 父. Require both signals to agree.
+      const same = hasCastList && (a.inCast || b.inCast)
+        ? looksAlike && a.castName === b.castName
+        : looksAlike;
+      if (same) {
+        group.push(b.name);
+        used.add(b.name);
       }
     }
     if (group.length > 1) groups.push(group);
   }
 
-  return { candidates, groups };
+  return { candidates, groups, castNames, hasCastList };
 }
 
 // --- Block classification -------------------------------------------------

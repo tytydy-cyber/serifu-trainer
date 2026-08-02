@@ -68,9 +68,14 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
   }
 
   if (appearances.length === 0) {
-    content.appendChild(el('div', { class: 'empty-state' }, '自分の台詞が見つかりませんでした。'));
+    content.appendChild(el('div', { class: 'empty-state' }, '自分のセリフが見つかりませんでした。'));
     return;
   }
+
+  content.appendChild(el('p', { class: 'lead' },
+    '自分のセリフが続くまとまりごとに「出番」に区切ってあります。今日さらう場面を選んで練習してください。'));
+  content.appendChild(el('p', { class: 'faint' },
+    'マスク練習は自分のセリフを隠して思い出す練習、音声稽古は相手のセリフを読み上げて実際に声に出す練習です。'));
 
   for (const a of appearances) {
     const myBlockIds = blocks
@@ -98,7 +103,11 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
 }
 
 function renderViewTab(content, script, blocks, roleMap, myRoleIds) {
-  const legend = el('div', { class: 'row wrap', style: 'margin-bottom:12px' }, [...roleMap.values()].map((r) => el('span', { class: 'badge' }, [
+  content.appendChild(el('p', { class: 'lead' },
+    '台本の全文です。自分のセリフには左側に色の線が付いています。'));
+  content.appendChild(el('p', { class: 'faint' },
+    '場面の見出しの横にある「📝 メモ」から、その場面の動き（立ち位置・移動）と小道具を書き留められます。'));
+  const legend = el('div', { class: 'row wrap', style: 'margin: 12px 0' }, [...roleMap.values()].map((r) => el('span', { class: 'badge' }, [
     el('span', { class: 'dot', style: `background:${r.color};width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px` }),
     r.name + (r.isMine ? '（自分）' : ''),
   ])));
@@ -113,7 +122,10 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds) {
 
 function renderNotesTab(content, script, blocks) {
   const scenes = getScenesForScript(script.id, blocks);
-  content.appendChild(el('p', { class: 'faint' }, '場面ごとの動き・小道具メモの一覧です。稽古前にまとめて確認できます。'));
+  content.appendChild(el('p', { class: 'lead' },
+    '場面ごとに、動き（立ち位置・移動）と小道具をメモできます。'));
+  content.appendChild(el('p', { class: 'faint' },
+    '稽古で決まった段取りをその場で書き留めておくと、次の稽古前にここだけ見返せます。場面を選んで開いてください。'));
   const list = el('div', { class: 'stack' });
   for (const s of scenes) {
     list.appendChild(el('div', { class: 'card tappable', onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/scene/${encodeURIComponent(s.id)}`; } }, [

@@ -17,7 +17,8 @@ export async function renderHome(app) {
   if (scripts.length === 0) {
     page.appendChild(el('div', { class: 'empty-state' }, [
       el('p', {}, '台本がまだありません。'),
-      el('p', { class: 'faint' }, '脚本を取り込んで、出番の把握とセリフ練習を始めましょう。'),
+      el('p', { class: 'faint' }, '下の「台本を取り込む」から脚本のファイルを選ぶと、役名とセリフを自動で読み取ります。'),
+      el('p', { class: 'faint' }, '自分の役を選ぶと出番ごとに区切られ、セリフを隠して覚える練習と、相手のセリフを読み上げる音声稽古ができます。'),
     ]));
   } else {
     const list = el('div', { class: 'stack' });

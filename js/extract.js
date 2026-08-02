@@ -269,6 +269,12 @@ export async function extractFromPdfFile(file, onProgress) {
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
     const { lines, baseSize: size, verticalVotes, horizontalVotes } = reconstructPageLines(content.items);
+    // classifyScript reads these line objects directly (not the joined page
+    // text withText() builds below), so normalization has to happen here to
+    // actually reach it — a script set in genuine Unicode vertical-form
+    // punctuation (﹁﹂︵︶, distinct code points from the familiar 「」（）)
+    // would otherwise match none of parser.js's patterns.
+    for (const l of lines) l.text = normalizeRawText(l.text);
     // The title page is set in display sizes, so take the body size from the
     // document as a whole rather than from whichever page happens to be first.
     sizeVotes.push(size);
@@ -282,6 +288,32 @@ export async function extractFromPdfFile(file, onProgress) {
   const baseSize = sizeVotes[Math.floor(sizeVotes.length / 2)] || 12;
   markLineRoles(allLines, baseSize, vertical >= horizontal);
   return stripRunningHeaders(pages).map(withText);
+}
+
+// Some Japanese PDFs embed a font subset whose ToUnicode mapping is simply
+// wrong for a handful of glyphs — almost always っ (sokuon) and ー (chōonpu) —
+// so the glyph renders correctly on the page but pdf.js's text layer reads it
+// as an unrelated ASCII character (a stray "9" or "F" in the middle of a
+// Japanese word). This happens in the source PDF itself; there is no correct
+// character to recover from the text layer, since which ASCII character a
+// given broken font produces isn't consistent from one PDF to the next — so
+// this only detects the pattern, to warn the user, rather than guessing at a
+// fix. A single ASCII letter or digit sitting between two Japanese characters
+// is a shape real text essentially never has, which is what makes it a
+// reliable tell instead of a false alarm on genuine mixed-script text like a
+// page number or an English acronym (which sit at a word boundary, not
+// stranded mid-word).
+const JP_RANGE = '぀-ヿ一-鿿';
+const STRANDED_ASCII_RE = new RegExp(`[${JP_RANGE}][0-9A-Za-z][${JP_RANGE}]`, 'gu');
+
+export function detectEncodingIssue(pages) {
+  const text = pages.map((p) => p.text).join('');
+  const matches = text.match(STRANDED_ASCII_RE) || [];
+  const totalChars = [...text].length || 1;
+  return {
+    suspicious: matches.length >= 15 && matches.length / totalChars > 0.002,
+    samples: [...new Set(matches.map((m) => m[1]))].slice(0, 5),
+  };
 }
 
 export async function extractFromFile(file, onProgress) {

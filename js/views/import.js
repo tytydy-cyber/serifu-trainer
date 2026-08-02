@@ -1,6 +1,6 @@
 import { db, uid } from '../db.js';
 import { el, toast, colorForIndex } from '../ui.js';
-import { extractFromFile, extractFromPlainText } from '../extract.js';
+import { extractFromFile, extractFromPlainText, detectEncodingIssue } from '../extract.js';
 import { extractRoleCandidates, extractCastList, classifyScript, buildRawText } from '../parser.js';
 import { computeAppearances } from '../appearances.js';
 
@@ -160,6 +160,7 @@ export async function renderImport(app) {
           throw new Error('文字を読み取れませんでした。画像だけのPDFの可能性があります。「文字を貼り付け」をお試しください。');
         }
         state.pages = pages;
+        state.encodingIssue = detectEncodingIssue(pages);
         const cast = extractCastList(pages);
         state.castNames = cast.names;
         const { candidates, groups, hasCastList } = extractRoleCandidates(pages, cast.names, { skipPages: cast.pages });
@@ -192,6 +193,14 @@ export async function renderImport(app) {
 
   function renderRoleCandidateStep() {
     const container = el('div', { class: 'stack' });
+
+    if (state.encodingIssue?.suspicious) {
+      container.appendChild(el('div', { class: 'note warn' }, [
+        el('strong', {}, 'このPDFは一部の文字が正しく読み取れていない可能性があります'),
+        el('div', {}, `「っ」「ー」などの文字が、埋め込みフォントの不具合でまれに別の文字（${state.encodingIssue.samples.map((s) => `「${s}」`).join('・')} など）に化けて読み取られています。見た目は正しく表示されているPDFでも、内部の文字データだけがずれていることがあります。`),
+        el('div', { style: 'margin-top:6px' }, '元がGoogleドキュメントやWordなら、そちらから「.docx」または「.txt」で書き出して取り込み直すと直ります。'),
+      ]));
+    }
 
     if (state.hasCastList) {
       container.appendChild(el('div', { class: 'note ok' }, [

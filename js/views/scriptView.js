@@ -24,7 +24,11 @@ export function renderBlockList(blocks, roleMap, options = {}) {
     }
 
     if (b.type === 'heading') {
-      const row = el('div', { class: 'row', style: 'justify-content:center;align-items:center;gap:10px' }, [
+      const isFocus = focusBlockId && b.id === focusBlockId;
+      // Every heading gets a stable, predictable id (not just the focused
+      // one) so the scene-jump picker can scroll straight to it without a
+      // full route change.
+      const row = el('div', { class: `row heading-row ${isFocus ? 'focus' : ''}`, id: isFocus ? 'focus-block' : `scene-${b.id}`, style: 'justify-content:center;align-items:center;gap:10px' }, [
         el('div', { class: 'block heading', style: 'margin:0' }, b.text),
         onSceneNoteClick ? el('button', { class: 'ghost', style: 'min-height:32px;padding:4px 10px;font-size:13px', onclick: () => onSceneNoteClick(b) }, '📝 メモ') : null,
       ]);

@@ -27,8 +27,27 @@ export function normalizeKey(name) {
   return toHalfWidth(name).trim().replace(/\s+/g, '');
 }
 
+// Vertical (縦書き) typesetting has its own Unicode block of punctuation —
+// visually identical to the familiar horizontal forms, just registered as
+// different code points (CJK Compatibility / Vertical Forms) — so a script
+// set this way can use 「」（） throughout and still fail every regex that
+// only knows the horizontal ones. Fold them together once, up front, so
+// every pattern in this file works the same regardless of which a given
+// script's font happened to use.
+const VERTICAL_FORM_MAP = {
+  '﹁': '「', '﹂': '」', '﹃': '『', '﹄': '』',
+  '︵': '（', '︶': '）', '︷': '｛', '︸': '｝',
+  '︹': '【', '︺': '】', '︻': '〔', '︼': '〕',
+  '︽': '《', '︾': '》', '︿': '〈', '﹀': '〉',
+  '︑': '、', '︒': '。', '︓': '：', '︔': '；', '︕': '！', '︖': '？',
+};
+const VERTICAL_FORM_RE = new RegExp(Object.keys(VERTICAL_FORM_MAP).join('|'), 'g');
+
 export function normalizeRawText(text) {
-  return text.replace(/\r\n?/g, '\n').replace(/\n{4,}/g, '\n\n\n');
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .replace(VERTICAL_FORM_RE, (c) => VERTICAL_FORM_MAP[c]);
 }
 
 // --- Role candidate extraction -------------------------------------------------

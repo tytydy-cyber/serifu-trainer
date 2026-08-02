@@ -49,14 +49,27 @@ const LYRIC_RE = /[♪♫♬]/;
 // so anything the body scan turns up that is absent from it can be surfaced
 // to the user as suspicious rather than silently accepted.
 
+const CAST_KEYWORDS_RE = /^(登場人物表|登場人物|人物表|人物|配役|役名|キャスト|出演者|出演)$/;
 const CAST_HEADING_RE = /^[\s　]*(登場人物表|登場人物|人物表|人物|配役|役名|キャスト|出演者|出演)[\s　]*[：:]?[\s　]*$/;
+// Front matter is often split into bracketed sections — 《登場人物》 for the
+// cast, then 《表記》 for a notation legend, 《演出の前提》 for staging notes —
+// with no blank line or punctuation between them. Recognizing the bracket
+// itself both finds a cast heading set this way, and lets collection stop
+// cleanly at the *next* such section instead of absorbing it as more names.
+const SECTION_HEADING_RE = /^[《【]([^》】]{1,20})[》】]$/;
+
+function isCastHeading(line) {
+  const m = SECTION_HEADING_RE.exec(line);
+  return CAST_KEYWORDS_RE.test((m ? m[1] : line).trim()) || CAST_HEADING_RE.test(line);
+}
 
 function splitCastEntry(line) {
   const cleaned = line
-    .replace(/[（(][^）)]*[）)]/g, '')   // 年齢・補足の括弧書き
-    .replace(/[…‥]{1,}.*$/, '')          // 「太郎……30歳、会社員」
-    .replace(/\t.*$/, '')                 // 俳優名が別カラムにある場合
-    .replace(/[ 　]{2,}.*$/, '')          // 同上（スペース揃え）
+    .replace(/[（(][^）)]*[）)]/g, '')     // 年齢・補足の括弧書き
+    .replace(/[［\[][^］\]]*[］\]]/g, '')  // ふりがな「川野樹里[じゅり]」
+    .replace(/[…‥]{1,}.*$/, '')            // 「太郎……30歳、会社員」
+    .replace(/\t.*$/, '')                   // 俳優名が別カラムにある場合
+    .replace(/[ 　]+.*$/, '')               // 「相原ほたる 事例制作会社の社員。」— 空白以降は説明文
     .trim();
   if (!cleaned) return [];
   // 「A／B」は一人二役の表記なのでどちらも役名として拾う
@@ -81,16 +94,25 @@ export function extractCastList(pages) {
     for (const raw of page.text.split('\n')) {
       const line = raw.trim();
       if (!collecting) {
-        if (CAST_HEADING_RE.test(line)) { collecting = true; castPages.add(page.pageNumber); }
+        if (isCastHeading(line)) { collecting = true; castPages.add(page.pageNumber); }
         continue;
       }
       if (++scanned > 200) break outer;
       if (!line) continue;
-      // The list ends where the play itself begins.
+      // The list ends where the play itself begins, or where a different
+      // bracketed section (notation legend, staging notes, ...) starts.
+      const section = SECTION_HEADING_RE.exec(line);
+      if (section && !CAST_KEYWORDS_RE.test(section[1])) break outer;
       if (HEADING_RE.test(line) || CUE_RE.test(line)) break outer;
-      if ([...line].length > 30 || /[。！？]/.test(line)) break outer;
+      // A cast entry can carry a description ("相原ほたる 事例制作会社の社員。") —
+      // splitCastEntry already strips that off, so judge the *name*, not
+      // whether the raw line happens to contain punctuation. Only a line that
+      // still doesn't reduce to something name-shaped reads as prose, i.e.
+      // the list has ended.
+      const entries = splitCastEntry(line);
+      if ([...line].length > 60 || entries.length === 0) break outer;
       castPages.add(page.pageNumber);
-      names.push(...splitCastEntry(line));
+      names.push(...entries);
     }
   }
   return { names: [...new Set(names)], pages: [...castPages] };

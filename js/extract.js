@@ -90,14 +90,17 @@ function reconstructPageLines(rawItems) {
   // running header is set horizontally over vertical body text would otherwise
   // hand the first body line the header's orientation.
   const startLine = (it) => {
-    cur = { text: it.str, startX: it.x, startY: it.y, bodyX: null, bodyY: null };
+    // The column just finished, if any — recorded here (not measured off a
+    // shared "bottom edge" coordinate, which turns out to have false friends:
+    // moderate-length columns coincidentally end near the same position often
+    // enough to look like a landmark) so markLineRoles can tell whether it
+    // used up all the vertical space it had, the mechanical reason a speech
+    // continues in the next column at all. Measured in character count, not
+    // points — a heading set in a display size would otherwise measure as
+    // "tall" on physical distance alone and be mistaken for a full column.
+    if (cur) cur.span = Math.hypot(prev.x - cur.startX, prev.y - cur.startY) / (cur.fontSize || baseSize);
+    cur = { text: it.str, startX: it.x, startY: it.y, span: 0, fontSize: it.height || baseSize };
     lines.push(cur);
-  };
-  const noteGap = (it) => {
-    // Where the text after the line's first gap begins. On a role-name line
-    // this is where the dialogue column starts, which is also where wrapped
-    // dialogue begins — giving us that landmark directly instead of inferring it.
-    if (cur.bodyX === null) { cur.bodyX = it.x; cur.bodyY = it.y; }
   };
 
   for (const it of main) {
@@ -115,18 +118,20 @@ function reconstructPageLines(rawItems) {
     if (sameColumn) {
       verticalVotes++;
       // A gap wider than the character pitch is a deliberate separation — this
-      // is the indent that sits between a role name and its dialogue.
-      if (-dy - pitch > pitch * 0.5) { cur.text += ' '; noteGap(it); }
+      // is the indent that sits between a role name and its dialogue, wherever
+      // a particular script happens to put it.
+      if (-dy - pitch > pitch * 0.5) cur.text += ' ';
       cur.text += it.str;
     } else if (sameRow) {
       horizontalVotes++;
-      if (dx - pitch > pitch * 0.6) { cur.text += ' '; noteGap(it); }
+      if (dx - pitch > pitch * 0.6) cur.text += ' ';
       cur.text += it.str;
     } else {
       startLine(it);
     }
     prev = it;
   }
+  if (cur) cur.span = Math.hypot(prev.x - cur.startX, prev.y - cur.startY) / (cur.fontSize || baseSize);
 
   return { lines, baseSize, verticalVotes, horizontalVotes };
 }
@@ -137,62 +142,73 @@ function reconstructPageLines(rawItems) {
 // dialogue column. That layout is the clearest evidence of what a line *is*,
 // and it survives in the PDF as the coordinate each line starts at.
 //
-// Rather than trying to recover margins by clustering coordinates — which
-// breaks down as soon as a page holds several text blocks with their own
-// margins, or a stray line lands between them — use a landmark we can read
-// off directly. On a role-name line the gap after the name lands exactly on
-// the dialogue column, and that is the same position wrapped dialogue starts
-// at. So collect those positions, keep the ones that recur, and a line
-// continues the previous one precisely when it begins at one of them.
+// Two things distinguish what a line is, and neither depends on how wide a
+// script sets its role-name field (which varies — some scripts reserve a
+// fixed-width slot for the name regardless of length, others just leave a
+// single gap after it, which puts the dialogue at a different position for
+// every name length):
+//
+//  - Where a column *starts*. Fresh content — a role name, or a stage
+//    direction with no name — begins at the margin, page after page, so that
+//    position is the single most common start coordinate in the document.
+//
+//  - Why a column *exists at all*. A column that is not fresh content but the
+//    continuation of a speech too long for the previous column exists only
+//    because that previous column ran out of room and got cut off at the
+//    page's bottom edge. That edge is mechanical — the same for every column
+//    that overflows, regardless of the text in it — so it is the single most
+//    common "previous column's last character" coordinate in the document.
+//    A line whose predecessor ended there is a forced continuation.
+//
+// Both are found the same way: histogram the coordinate, take whichever value
+// recurs most. Neither needs to know the width of anything.
 function markLineRoles(allLines, baseSize, vertical) {
   if (allLines.length === 0) return;
   const startOf = (l) => (vertical ? l.startY : l.startX);
-  const bodyOf = (l) => (vertical ? l.bodyY : l.bodyX);
-  // Distance from the dialogue column back towards the margin, as a positive
-  // number regardless of which way the script is set.
-  const towardsMargin = (from, column) => (vertical ? from - column : column - from);
+  const tolerance = baseSize * 0.6;
 
-  const bodyCounts = new Map();
+  // A column that used up (nearly) all the vertical space available to it was
+  // almost certainly cut off rather than having ended there on purpose — so
+  // whatever comes right after it is that same speech continuing. Measuring
+  // each column's own span and comparing it to the tallest columns in the
+  // document is more reliable than trying to recognize "the bottom edge" as a
+  // shared coordinate: moderate-length columns end near the same position
+  // often enough, by coincidence, to be mistaken for it.
+  const spans = allLines.map((l) => l.span).filter((s) => s > 0).sort((a, b) => a - b);
+  const tallSpan = spans.length ? spans[Math.floor(spans.length * 0.97)] : Infinity;
+  const fullThreshold = tallSpan * 0.85;
+
+  // Collect every coordinate that recurs often enough to be a real landmark
+  // rather than a coincidence. A page can hold more than one independent
+  // block of text with its own margin (this script sets two stacked bands
+  // per page), so this keeps every such value rather than assuming a single
+  // one applies to the whole document.
+  const counts = new Map();
   for (const line of allLines) {
-    if (bodyOf(line) === null) continue;
-    const key = Math.round(bodyOf(line));
-    bodyCounts.set(key, (bodyCounts.get(key) || 0) + 1);
+    const key = Math.round(startOf(line));
+    counts.set(key, (counts.get(key) || 0) + 1);
   }
-  // A real dialogue column recurs on page after page; a one-off gap does not.
-  const minHits = Math.max(3, allLines.length * 0.02);
-  const columns = [...bodyCounts.entries()]
-    .filter(([, count]) => count >= minHits)
-    .map(([coord]) => coord);
+  const minHits = Math.max(3, allLines.length * 0.015);
+  const candidates = [...counts.entries()].filter(([, c]) => c >= minHits).map(([k]) => k);
+  // A stage direction is deliberately pulled in a little from the true margin
+  // — so its start position can itself recur often enough to look like a
+  // landmark. Tell the two apart the way frequency tells apart any real
+  // pattern from a lesser echo of it: keep a candidate only if nothing close
+  // to it is *more* common, since most lines in a scene are dialogue, not
+  // bare narration.
+  const groupDistance = baseSize * 3;
+  const margins = candidates.filter((c) => !candidates.some(
+    (other) => other !== c && Math.abs(other - c) <= groupDistance && counts.get(other) > counts.get(c)
+  ));
+  const atMargin = (value) => margins.some((m) => Math.abs(value - m) <= tolerance);
 
-  if (columns.length === 0) {
-    for (const line of allLines) line.lineRole = 'margin';
-    return;
-  }
-
-  // How far the margin sits from the dialogue column — i.e. the width of the
-  // role-name field. Measured from the role lines themselves, where both
-  // positions are known, so it needs no assumption about the page layout.
-  const offsets = allLines
-    .filter((l) => bodyOf(l) !== null)
-    .map((l) => towardsMargin(startOf(l), bodyOf(l)))
-    .filter((v) => v > 0)
-    .sort((a, b) => a - b);
-  const marginOffset = offsets[Math.floor(offsets.length / 2)] || baseSize;
-
-  const tolerance = baseSize * 0.5;
-  for (const line of allLines) {
-    const start = startOf(line);
-    // Compare against whichever dialogue column this line sits nearest, so a
-    // page holding several blocks of text needs no special handling.
-    const column = columns.reduce(
-      (best, c) => (Math.abs(start - c) < Math.abs(start - best) ? c : best),
-      columns[0]
-    );
-    const rel = towardsMargin(start, column);
-    if (Math.abs(rel) <= tolerance) line.lineRole = 'continuation';
-    else if (Math.abs(rel - marginOffset) <= tolerance) line.lineRole = 'margin';
-    else line.lineRole = rel > 0 ? 'indented' : 'continuation';
-    line.isContinuation = line.lineRole === 'continuation';
+  for (let i = 0; i < allLines.length; i++) {
+    const line = allLines[i];
+    const isForcedContinuation = i > 0 && allLines[i - 1].span >= fullThreshold;
+    if (isForcedContinuation) line.lineRole = 'continuation';
+    else if (atMargin(startOf(line))) line.lineRole = 'margin';
+    else line.lineRole = 'indented';
+    line.isContinuation = isForcedContinuation;
   }
 }
 
@@ -201,22 +217,32 @@ function markLineRoles(allLines, baseSize, vertical) {
 // every single page in the manual-fix step.
 function stripRunningHeaders(pages) {
   const withoutTrailingNumber = (line) => line.replace(/[0-9０-９\s]+$/, '').trim();
+  // Some scripts print nothing but the page number itself as the header —
+  // withoutTrailingNumber reduces that to '', which would otherwise never
+  // reach the length-3 floor that guards against stripping a coincidence.
+  const isBareNumber = (line) => /^[0-9０-９]+$/.test(line.trim());
 
   const counts = new Map();
+  let bareNumberPages = 0;
   for (const p of pages) {
-    const key = withoutTrailingNumber(p.lines[0]?.text || '');
+    const first = p.lines[0]?.text || '';
+    if (isBareNumber(first)) { bareNumberPages++; continue; }
+    const key = withoutTrailingNumber(first);
     if (key.length >= 3) counts.set(key, (counts.get(key) || 0) + 1);
   }
+  const threshold = Math.max(3, pages.length * 0.5);
   let headerKey = null;
   for (const [key, count] of counts) {
-    if (count >= Math.max(3, pages.length * 0.5)) { headerKey = key; break; }
+    if (count >= threshold) { headerKey = key; break; }
   }
-  if (!headerKey) return pages;
+  const stripBareNumbers = bareNumberPages >= threshold;
+  if (!headerKey && !stripBareNumbers) return pages;
 
   return pages.map((p) => {
-    if (p.lines.length && withoutTrailingNumber(p.lines[0].text) === headerKey) {
-      return { ...p, lines: p.lines.slice(1) };
-    }
+    const first = p.lines[0]?.text;
+    if (!p.lines.length) return p;
+    if (headerKey && withoutTrailingNumber(first) === headerKey) return { ...p, lines: p.lines.slice(1) };
+    if (stripBareNumbers && isBareNumber(first)) return { ...p, lines: p.lines.slice(1) };
     return p;
   });
 }

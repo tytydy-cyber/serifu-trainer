@@ -110,9 +110,9 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
 
 function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId) {
   content.appendChild(el('p', { class: 'lead' },
-    '台本の全文です。自分のセリフには左側に色の線が付いています。'));
+    '台本の全文を読み返せる画面です（編集はできません）。自分のセリフには左側に色の線が付いています。練習中に迷ったら「台本で見る」からここに戻ってこられます。'));
   content.appendChild(el('p', { class: 'faint' },
-    '場面の見出しの横にある「📝 メモ」から、その場面の動き（立ち位置・移動）と小道具を書き留められます。'));
+    '場面の見出しの横にある「📝 メモ」から、その場面の動き（立ち位置・移動）と小道具を書き留められます。赤枠は自動判定がうまくいかなかった行です。'));
   const legend = el('div', { class: 'row wrap', style: 'margin: 12px 0' }, [...roleMap.values()].map((r) => el('span', { class: 'badge' }, [
     el('span', { class: 'dot', style: `background:${r.color};width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px` }),
     r.name + (r.isMine ? '（自分）' : ''),

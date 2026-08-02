@@ -319,22 +319,41 @@ function matchRoleAndBody(line, lookup) {
   return null;
 }
 
+const MULTI_ROLE_SEP = /[・／\/＆&]/;
+
+// A name inside "A＆B" is often shorter than that role's usual attribution
+// elsewhere (姉＆麺 for 姉＆麺太郎) — the simultaneous-line tag only needs to
+// be unambiguous, not the full name. Resolve it the same way an abbreviated
+// cast-list entry is resolved: exact match first, then the registered name
+// containing it.
+function resolveAbbrRole(name, lookup) {
+  const key = normalizeKey(name);
+  if (!key) return null;
+  const exact = lookup.find((e) => e.key === key);
+  if (exact) return exact.roleId;
+  const partial = lookup.find((e) => e.key.startsWith(key) || key.startsWith(e.key));
+  return partial ? partial.roleId : null;
+}
+
 function matchMultiRolePrefix(line, lookup) {
-  // "A・B「せりふ」" style simultaneous lines
-  const sepIdx = line.search(/[・／\/＆&]/);
-  if (sepIdx < 0 || sepIdx > 20) return null;
-  const head = line.slice(0, line.search(/[:：「\t]/) >= 0 ? line.search(/[:：「\t]/) : sepIdx + 3);
-  const names = head.split(/[・／\/＆&]/).map((s) => s.trim()).filter(Boolean);
+  // "A・B「せりふ」" / "A＆B せりふ" style simultaneous lines.
+  if (!MULTI_ROLE_SEP.test(line)) return null;
+  // The name list ends at the first delimiter that could start the dialogue
+  // (colon, bracket, tab, or a plain space) — not a fixed offset, since names
+  // can be anywhere from one character to a full given name.
+  const delim = /[:：「\t ]/.exec(line);
+  const head = delim ? line.slice(0, delim.index) : line;
+  if (!MULTI_ROLE_SEP.test(head)) return null;
+
+  const names = head.split(MULTI_ROLE_SEP).map((s) => s.trim()).filter(Boolean);
   if (names.length < 2) return null;
   const roleIds = [];
   for (const n of names) {
-    const key = normalizeKey(n);
-    const found = lookup.find((e) => e.key === key);
-    if (!found) return null;
-    roleIds.push(found.roleId);
+    const roleId = resolveAbbrRole(n, lookup);
+    if (!roleId) return null;
+    roleIds.push(roleId);
   }
-  const restIdx = line.indexOf(head) + head.length;
-  return { roleIds, matchedLen: restIdx };
+  return { roleIds, matchedLen: head.length };
 }
 
 function extractInlineDirections(text) {
@@ -447,9 +466,14 @@ export function classifyScript(pages, confirmedRoles) {
       // A line that matches nothing is often not a new "unknown" thought but
       // the tail of the previous line's text, split by a column/row wrap in
       // the source PDF (typesetting, not a sentence boundary). Fold it back
-      // into the previous block instead of creating a stray fragment.
+      // into the previous block instead of creating a stray fragment — unless
+      // it still looks like an attempted speaker tag (e.g. "父＆麺 ああ！"
+      // where an abbreviation didn't resolve to a known role): that should
+      // stay visible as unknown so it gets noticed and fixed, rather than
+      // silently merging one character's line into another's.
+      const looksLikeUnresolvedSpeaker = !block.isContinuation && MULTI_ROLE_SEP.test(line.slice(0, 6));
       const prevBlock = blocks[blocks.length - 1];
-      if (block.type === 'unknown' && prevBlock && (prevBlock.type === 'line' || prevBlock.type === 'direction')) {
+      if (block.type === 'unknown' && !looksLikeUnresolvedSpeaker && prevBlock && (prevBlock.type === 'line' || prevBlock.type === 'direction')) {
         prevBlock.text += block.text;
         prevBlock.srcEnd = finalSrcEnd;
         if (prevBlock.type === 'line') prevBlock.inlineDirections = extractInlineDirections(prevBlock.text);

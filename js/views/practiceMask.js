@@ -114,9 +114,19 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
     const roleNames = (block.roleIds || []).map((rid) => roleMap.get(rid)?.name || '?').join('・');
 
     const textEl = el('div', { class: 'mask-text' }, maskLevel(block.text, hintLevel));
+    // Separate from hintLevel: whether the full line is currently on screen.
+    // Tapping 文字数/頭出し/一文 alone should not count as having seen the
+    // answer — only 全文, or a first tap of a judge button, does.
+    let revealed = false;
+    const confirmHint = el('div', { class: 'faint', style: 'margin:4px 0;visibility:hidden' }, 'もう一度タップで記録します');
 
     const hintRow = el('div', { class: 'hint-row' }, HINT_LABELS.map((label, i) => el('button', {
-      onclick: () => { hintLevel = Math.max(hintLevel, i + 1); textEl.textContent = maskLevel(block.text, hintLevel); updateJudgeButtons(); },
+      onclick: () => {
+        hintLevel = Math.max(hintLevel, i + 1);
+        if (hintLevel >= 4) revealed = true;
+        textEl.textContent = maskLevel(block.text, hintLevel);
+        updateJudgeButtons();
+      },
     }, label)));
 
     const gotBtn = el('button', { class: 'got', onclick: () => judge('got') }, '言えた');
@@ -125,15 +135,26 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
     const judgeRow = el('div', { class: 'judge-row' }, [gotBtn, shakyBtn, missedBtn]);
 
     function updateJudgeButtons() {
-      gotBtn.disabled = hintLevel >= 3;
-      gotBtn.title = hintLevel >= 3 ? 'ヒントを多く使ったため選べません' : '';
+      // Hints past 一文 already show most of the line, so claiming "言えた"
+      // at that point would not mean much — same rule as before.
+      gotBtn.disabled = hintLevel >= 3 && !revealed;
+      gotBtn.title = gotBtn.disabled ? 'ヒントを多く使ったため選べません' : '';
     }
     updateJudgeButtons();
 
     async function judge(result) {
+      // First tap: show the correct line so it can be checked against what
+      // was actually said, without recording anything yet. Second tap (of
+      // any judge button, now that the answer is visible) records it.
+      if (!revealed) {
+        revealed = true;
+        textEl.textContent = block.text;
+        confirmHint.style.visibility = 'visible';
+        updateJudgeButtons();
+        return;
+      }
       results[result]++;
       await recordResult(block.id, result);
-      textEl.textContent = block.text;
       contextBlocks.push(block);
       cursor++;
       step();
@@ -157,6 +178,7 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
     ]));
     targetArea.appendChild(textEl);
     targetArea.appendChild(hintRow);
+    targetArea.appendChild(confirmHint);
     targetArea.appendChild(judgeRow);
   }
 

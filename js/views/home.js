@@ -75,7 +75,7 @@ async function renderScriptCard(script) {
     el('h3', {}, script.title || '無題の台本'),
     el('div', { class: 'meta faint' }, [
       script.revision ? el('span', {}, script.revision) : null,
-      el('span', {}, `自分の台詞 ${total}`),
+      el('span', {}, `自分のセリフ ${total}本`),
       daysLeft != null ? el('span', { style: daysLeft <= 3 ? 'color:var(--missed)' : '' }, daysLeft >= 0 ? `本番まであと${daysLeft}日` : '本番終了') : null,
       el('span', {}, formatDate(script.createdAt)),
     ]),

@@ -61,7 +61,10 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
   }
 
   let appearances = await db.byIndex('appearances', 'scriptId', script.id);
-  if (appearances.length === 0) {
+  // Scripts imported before scene previews existed have appearance records
+  // without them — recompute rather than show a blank title for every card.
+  const needsRecompute = appearances.length === 0 || appearances.some((a) => a.preview === undefined);
+  if (needsRecompute) {
     const ranges = computeAppearances(blocks, [...myRoleIds]);
     appearances = ranges.map((r) => ({ id: `appear_${script.id}_${r.index}`, scriptId: script.id, ...r }));
     if (appearances.length) await db.putMany('appearances', appearances);
@@ -91,15 +94,15 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
     const { counts, total } = summarize([...progressMap.values()]);
 
     content.appendChild(el('div', { class: 'card' }, [
-      el('div', { class: 'spread' }, [
-        el('h3', { style: 'margin:0' }, a.label),
-      ]),
-      total > 0 ? el('div', { class: 'progress-bar', style: 'margin:10px 0' }, [
+      el('div', { class: 'faint' }, `出番${a.index + 1}　p.${a.startPage}–${a.endPage}${a.sceneHeading ? `　・　${a.sceneHeading}` : ''}`),
+      el('h3', { style: 'margin:4px 0 10px' }, a.preview ? `「${a.preview}」` : `（自分のセリフなし）`),
+      total > 0 ? el('div', { class: 'progress-bar', style: 'margin-bottom:8px' }, [
         el('span', { class: 'got', style: `width:${(counts.got / total) * 100}%` }),
         el('span', { class: 'shaky', style: `width:${(counts.shaky / total) * 100}%` }),
         el('span', { class: 'missed', style: `width:${(counts.missed / total) * 100}%` }),
         el('span', { class: 'unseen', style: `width:${(counts.unseen / total) * 100}%` }),
       ]) : null,
+      el('div', { class: 'faint', style: 'margin-bottom:10px' }, `自分のセリフ ${a.myLineCount}本${total > 0 ? `（言えた ${counts.got} ・ 怪しい ${counts.shaky} ・ 出なかった ${counts.missed} ・ 未練習 ${counts.unseen}）` : '（まだ練習していません）'}`),
       el('div', { class: 'row' }, [
         el('button', { class: 'primary', onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/practice/mask/${a.index}`; } }, 'マスク練習'),
         el('button', { onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/practice/voice/${a.index}`; } }, '音声稽古'),

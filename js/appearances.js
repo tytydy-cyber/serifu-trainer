@@ -33,14 +33,35 @@ export function computeAppearances(blocks, myRoleIds, gapThreshold = DEFAULT_GAP
   }
   ranges.push([rangeStart, rangeEnd]);
 
+  // Scene heading detection is only as good as a given script's formatting
+  // (see parser.js) — some scripts we've tested against have none at all.
+  // A snippet of the reader's own first line is available for every
+  // appearance regardless, so it's the fallback that always works: not "what
+  // scene is this" but "what do I say first", which is what actually jogs
+  // memory of a scene.
+  const truncate = (text, max) => {
+    const t = text.trim();
+    return t.length > max ? t.slice(0, max) + '…' : t;
+  };
+  const preview = (text) => truncate(text, 22);
+
+  let precedingHeading = null;
+  let headingCursor = 0;
+
   return ranges.map(([startIdx, endIdx], i) => {
     const leadStart = Math.max(0, startIdx - LEAD_IN);
     const leadEnd = Math.min(blocks.length - 1, endIdx + LEAD_IN);
     const startBlock = blocks[leadStart];
     const endBlock = blocks[leadEnd];
-    const myLineCount = blocks
-      .slice(startIdx, endIdx + 1)
-      .filter(isMine).length;
+    const rangeBlocks = blocks.slice(startIdx, endIdx + 1);
+    const myLineCount = rangeBlocks.filter(isMine).length;
+    const firstMine = rangeBlocks.find(isMine);
+
+    while (headingCursor <= leadStart) {
+      if (blocks[headingCursor].type === 'heading') precedingHeading = blocks[headingCursor].text;
+      headingCursor++;
+    }
+
     return {
       index: i,
       startOrder: startBlock.order,
@@ -48,7 +69,9 @@ export function computeAppearances(blocks, myRoleIds, gapThreshold = DEFAULT_GAP
       startPage: startBlock.page,
       endPage: endBlock.page,
       myLineCount,
-      label: `出番${i + 1}  p.${startBlock.page}–${endBlock.page}  自分の台詞 ${myLineCount}`,
+      sceneHeading: precedingHeading ? truncate(precedingHeading, 14) : null,
+      preview: firstMine ? preview(firstMine.text) : '',
+      label: `出番${i + 1}  p.${startBlock.page}–${endBlock.page}  自分のセリフ ${myLineCount}本`,
     };
   });
 }

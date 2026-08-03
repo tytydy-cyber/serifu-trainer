@@ -374,20 +374,54 @@ export async function renderImport(app) {
       '「要確認」だけ表示する',
     ]));
     container.appendChild(el('p', { class: 'faint' },
-      '「要確認」は、役のセリフともト書きとも判断できなかった行です。多くはタイトルや登場人物表など本文以外の部分なので、そのままでも練習には影響しません。'));
+      '「要確認」は、役のセリフともト書きとも判断できなかった行です。多くはタイトルや登場人物表など本文以外の部分なので、そのままでも練習には影響しません。前後の行も薄く表示しているので、流れを見て判断してください。'));
 
     const list = el('div', { class: 'block-list' });
     container.appendChild(list);
 
+    const CONTEXT = 2; // lines of surrounding context shown around each flagged row
+
+    function isIssue(b) { return b.type === 'unknown' || b.confidence < 0.6; }
+
     function renderList() {
       list.innerHTML = '';
-      state.blocks.forEach((b) => {
-        if (onlyIssues && !(b.type === 'unknown' || b.confidence < 0.6)) return;
-        list.appendChild(renderFixRow(b));
-      });
-      if (list.children.length === 0) {
-        list.appendChild(el('div', { class: 'empty-state' }, '直すべき行はありません。そのまま保存できます。'));
+      if (!onlyIssues) {
+        state.blocks.forEach((b) => list.appendChild(renderFixRow(b)));
+        if (list.children.length === 0) {
+          list.appendChild(el('div', { class: 'empty-state' }, '直すべき行はありません。そのまま保存できます。'));
+        }
+        return;
       }
+
+      const flaggedIdx = [];
+      state.blocks.forEach((b, i) => { if (isIssue(b)) flaggedIdx.push(i); });
+      if (flaggedIdx.length === 0) {
+        list.appendChild(el('div', { class: 'empty-state' }, '直すべき行はありません。そのまま保存できます。'));
+        return;
+      }
+
+      let lastShownIdx = -1;
+      for (const idx of flaggedIdx) {
+        const from = Math.max(0, idx - CONTEXT);
+        const to = Math.min(state.blocks.length - 1, idx + CONTEXT);
+        if (lastShownIdx >= 0 && from > lastShownIdx + 1) {
+          list.appendChild(el('div', { class: 'faint', style: 'text-align:center;margin:14px 0' }, '……'));
+        }
+        const start = Math.max(from, lastShownIdx + 1);
+        for (let i = start; i <= to; i++) {
+          if (i === idx) list.appendChild(renderFixRow(state.blocks[i]));
+          else if (i > lastShownIdx) list.appendChild(renderContextRow(state.blocks[i]));
+        }
+        lastShownIdx = Math.max(lastShownIdx, to);
+      }
+    }
+
+    function renderContextRow(b) {
+      return el('div', { class: 'faint', style: 'padding:6px 12px;font-size:14px;line-height:1.6' }, [
+        el('span', { class: 'page-tag' }, `p.${b.page}　`),
+        el('span', {}, `[${TYPE_LABELS[b.type]}] `),
+        b.text || '（空行）',
+      ]);
     }
 
     function renderFixRow(b) {

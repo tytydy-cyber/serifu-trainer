@@ -48,8 +48,10 @@ export async function renderHome(app) {
   } });
   document.body.appendChild(importInput);
 
-  page.appendChild(el('div', { class: 'row', style: 'margin-top:20px;justify-content:center' }, [
-    el('button', { class: 'ghost', onclick: () => importInput.click() }, 'バックアップから復元'),
+  page.appendChild(el('div', { style: 'margin-top:20px;text-align:center' }, [
+    el('button', { class: 'ghost', onclick: () => importInput.click() }, 'バックアップ（.json）から復元'),
+    el('p', { class: 'faint', style: 'margin-top:6px' },
+      '「書き出し」で保存しておいた控えファイルを読み込んで、この端末に全データを戻すためのボタンです。台本を追加したいときは、下の「＋ 台本を取り込む」を使ってください。'),
   ]));
 
   app.appendChild(el('div', { class: 'fab-row' }, [

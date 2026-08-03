@@ -97,6 +97,13 @@ export const db = {
     const blocks = await this.byIndex('blocks', 'scriptId', scriptId);
     const appearances = await this.byIndex('appearances', 'scriptId', scriptId);
     const notes = await this.byIndex('sceneNotes', 'scriptId', scriptId);
+    // Gather progress rows before opening the progress store's writable
+    // transaction below — an await between opening a transaction and its
+    // first request lets IndexedDB auto-commit it as idle, which then makes
+    // every delete() on it throw TransactionInactiveError.
+    const blockIds = new Set(blocks.map((b) => b.id));
+    const allProgress = await this.all('progress');
+
     const store = await tx('roles', 'readwrite');
     await Promise.all(roles.map((r) => wrapReq(store.delete(r.id))));
     const bstore = await tx('blocks', 'readwrite');
@@ -106,8 +113,6 @@ export const db = {
     const nstore = await tx('sceneNotes', 'readwrite');
     await Promise.all(notes.map((n) => wrapReq(nstore.delete(n.id))));
     const pstore = await tx('progress', 'readwrite');
-    const blockIds = new Set(blocks.map((b) => b.id));
-    const allProgress = await this.all('progress');
     await Promise.all(
       allProgress.filter((p) => blockIds.has(p.blockId)).map((p) => wrapReq(pstore.delete(p.blockId)))
     );

@@ -71,6 +71,8 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
   }
   appearances.sort((a, b) => a.startOrder - b.startOrder);
 
+  if (script.revisionDiff) await renderRevisionDiffCard(content, script, blocks, appearances);
+
   if (script.performanceDate) {
     const daysLeft = Math.ceil((script.performanceDate - Date.now()) / 86400000);
     content.appendChild(el('div', { class: 'card' }, daysLeft >= 0 ? `本番まであと ${daysLeft} 日` : '本番は終了しました'));
@@ -109,6 +111,55 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
       ]),
     ]));
   }
+}
+
+async function renderRevisionDiffCard(content, script, blocks, appearances) {
+  const d = script.revisionDiff;
+  const parent = await db.get('scripts', d.parentScriptId);
+  const blockMap = new Map(blocks.map((b) => [b.id, b]));
+  const changedIds = new Set([...d.addedBlockIds, ...d.modifiedPairs.map((p) => p.newBlockId)]);
+  const affected = appearances.filter((a) =>
+    blocks.some((b) => changedIds.has(b.id) && b.order >= a.startOrder && b.order <= a.endOrder));
+
+  const diffRows = [];
+  if (d.modifiedPairs.length) {
+    const parentBlocks = await db.byIndex('blocks', 'scriptId', d.parentScriptId);
+    const parentBlockMap = new Map(parentBlocks.map((b) => [b.id, b]));
+    for (const pair of d.modifiedPairs) {
+      const newB = blockMap.get(pair.newBlockId);
+      const oldB = parentBlockMap.get(pair.oldBlockId);
+      if (!newB) continue;
+      diffRows.push(el('div', { style: 'border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:8px' }, [
+        el('span', { class: 'badge' }, '変更'),
+        el('div', { class: 'faint', style: 'text-decoration:line-through;margin-top:4px' }, oldB ? oldB.text : '（旧テキスト不明）'),
+        el('div', { style: 'margin-top:2px' }, newB.text),
+      ]));
+    }
+  }
+  for (const id of d.addedBlockIds) {
+    const b = blockMap.get(id);
+    if (!b) continue;
+    diffRows.push(el('div', { style: 'border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:8px' }, [
+      el('span', { class: 'badge' }, '追加'),
+      el('div', { style: 'margin-top:4px' }, b.text),
+    ]));
+  }
+
+  content.appendChild(el('div', { class: 'note ok' }, [
+    el('strong', {}, parent ? `「${parent.title}」からの改訂版です` : '改訂版として取り込まれています'),
+    el('div', {}, `変更 ${d.modifiedCount}　・　追加 ${d.addedCount}　・　削除 ${d.deletedCount}　・　変更なし ${d.unchangedCount}`),
+    el('div', { class: 'faint', style: 'margin-top:2px' }, '変更のなかったセリフは、以前の練習記録をそのまま引き継いでいます。変更されたセリフは「怪しい」として登録し直しました。'),
+    affected.length ? el('div', { class: 'row wrap', style: 'margin-top:10px' },
+      affected.map((a) => el('button', {
+        class: 'ghost small',
+        onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/practice/mask/${a.index}`; },
+      }, `出番${a.index + 1}で確認`))
+    ) : null,
+    diffRows.length ? el('details', { style: 'margin-top:10px' }, [
+      el('summary', {}, '変更点の一覧を見る'),
+      el('div', { style: 'margin-top:8px' }, diffRows),
+    ]) : null,
+  ]));
 }
 
 function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId) {

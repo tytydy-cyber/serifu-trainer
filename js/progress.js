@@ -51,3 +51,23 @@ export function summarize(progressList) {
   const total = progressList.length || 1;
   return { counts, total, gotRatio: counts.got / total };
 }
+
+// Carries a block's practice history across a revision. An untouched line
+// (still 'unseen') has nothing worth copying. A reworded line keeps its
+// attempt count but is demoted to 'shaky' — the wording changed, so the old
+// streak toward a longer review interval no longer means the actor knows
+// *this* phrasing.
+export function carryOverProgress(oldProgress, newBlockId, { modified }) {
+  if (!oldProgress || oldProgress.attempts === 0) return null;
+  if (modified) {
+    return {
+      blockId: newBlockId,
+      status: 'shaky',
+      streak: 0,
+      attempts: oldProgress.attempts,
+      lastReviewedAt: oldProgress.lastReviewedAt,
+      dueAt: Date.now() + DAY,
+    };
+  }
+  return { ...oldProgress, blockId: newBlockId };
+}

@@ -3,6 +3,8 @@ import { el, toast, colorForIndex } from '../ui.js';
 import { extractFromFile, extractFromPlainText, detectEncodingIssue } from '../extract.js';
 import { extractRoleCandidates, extractCastList, classifyScript, buildRawText } from '../parser.js';
 import { computeAppearances } from '../appearances.js';
+import { computeRevisionDiff } from '../diff.js';
+import { getProgress, carryOverProgress } from '../progress.js';
 
 const TYPE_LABELS = { heading: '見出し', cue: 'キュー', line: 'セリフ', direction: 'ト書き', unknown: '要確認' };
 
@@ -14,12 +16,15 @@ const STEPS = [
 ];
 
 export async function renderImport(app) {
+  const existingScripts = (await db.all('scripts')).sort((a, b) => b.createdAt - a.createdAt);
+
   const state = {
     step: 'source',
     sourceMethod: 'file',
     title: '',
     revision: '',
     performanceDate: '',
+    parentScriptId: null,
     pages: [],
     castNames: [],
     hasCastList: false,
@@ -148,6 +153,25 @@ export async function renderImport(app) {
       el('label', {}, [el('div', { class: 'field-label' }, '本番日（任意）'), dateInput,
         el('div', { class: 'faint' }, '入れておくと「本番まであと何日」が表示されます')]),
     ]));
+
+    if (existingScripts.length) {
+      const parentSelect = el('select', {
+        onchange: (e) => { state.parentScriptId = e.target.value || null; },
+      }, [
+        el('option', { value: '' }, 'なし（新しい台本として取り込む）'),
+        ...existingScripts.map((s) => el('option', {
+          value: s.id,
+          selected: state.parentScriptId === s.id,
+        }, `${s.title}${s.revision ? `（${s.revision}）` : ''}`)),
+      ]);
+      container.appendChild(el('div', { class: 'card stack' }, [
+        el('label', {}, [
+          el('div', { class: 'field-label' }, '改訂元の台本（任意）'),
+          parentSelect,
+          el('div', { class: 'faint' }, '台本が改訂されたときに選ぶと、変わらなかったセリフの練習記録を引き継ぎ、変わった箇所だけをあとで確認できます。'),
+        ]),
+      ]));
+    }
 
     container.appendChild(el('div', { style: 'height:70px' }));
 
@@ -446,12 +470,61 @@ export async function renderImport(app) {
     const appearanceRanges = computeAppearances(blocks, myRoleIds);
     const appearances = appearanceRanges.map((a) => ({ id: uid('appear'), scriptId, ...a }));
 
+    let progressToSave = [];
+    if (state.parentScriptId) {
+      const parentBlocks = (await db.byIndex('blocks', 'scriptId', state.parentScriptId)).sort((a, b) => a.order - b.order);
+      const parentRoles = await db.byIndex('roles', 'scriptId', state.parentScriptId);
+      const lineBlocks = blocks.filter((b) => b.type === 'line');
+      if (parentBlocks.length && lineBlocks.length) {
+        const { newBlockStatus, deletedOldBlockIds } = computeRevisionDiff(parentRoles, parentBlocks, roles, blocks);
+        const addedBlockIds = [];
+        const modifiedPairs = [];
+        let unchangedCount = 0;
+        for (const b of lineBlocks) {
+          const info = newBlockStatus.get(b.id);
+          if (!info) continue;
+          if (info.status === 'unchanged') {
+            unchangedCount++;
+            const oldP = await getProgress(info.matchedOldBlockId);
+            const carried = carryOverProgress(oldP, b.id, { modified: false });
+            if (carried) progressToSave.push(carried);
+          } else if (info.status === 'modified') {
+            modifiedPairs.push({ newBlockId: b.id, oldBlockId: info.matchedOldBlockId });
+            const oldP = await getProgress(info.matchedOldBlockId);
+            const carried = carryOverProgress(oldP, b.id, { modified: true });
+            if (carried) progressToSave.push(carried);
+          } else {
+            addedBlockIds.push(b.id);
+          }
+        }
+        const parentLineIds = new Set(parentBlocks.filter((b) => b.type === 'line').map((b) => b.id));
+        const deletedCount = deletedOldBlockIds.filter((id) => parentLineIds.has(id)).length;
+
+        script.parentScriptId = state.parentScriptId;
+        script.revisionDiff = {
+          parentScriptId: state.parentScriptId,
+          addedCount: addedBlockIds.length,
+          modifiedCount: modifiedPairs.length,
+          unchangedCount,
+          deletedCount,
+          addedBlockIds,
+          modifiedPairs,
+        };
+      }
+    }
+
     await db.put('scripts', script);
     await db.putMany('roles', roles);
     await db.putMany('blocks', blocks);
     await db.putMany('appearances', appearances);
+    if (progressToSave.length) await db.putMany('progress', progressToSave);
 
-    toast('台本を保存しました');
+    if (script.revisionDiff) {
+      const d = script.revisionDiff;
+      toast(`改訂版として保存しました（変更 ${d.modifiedCount}・追加 ${d.addedCount}・削除 ${d.deletedCount}）`);
+    } else {
+      toast('台本を保存しました');
+    }
     location.hash = `#/script/${encodeURIComponent(scriptId)}`;
   }
 

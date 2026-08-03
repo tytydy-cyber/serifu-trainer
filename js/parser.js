@@ -77,9 +77,14 @@ const CAST_HEADING_RE = /^[\s　]*(登場人物表|登場人物|人物表|人物
 // cleanly at the *next* such section instead of absorbing it as more names.
 const SECTION_HEADING_RE = /^[《【]([^》】]{1,20})[》】]$/;
 
+// Scripts often set a bullet/decoration character before the heading itself
+// ("▼登場人物"), which CAST_HEADING_RE's exact-line match would otherwise miss.
+const CAST_LEADING_DECOR_RE = /^[\s　▼▽■□●○◆◇★☆＊*・]+/;
+
 function isCastHeading(line) {
   const m = SECTION_HEADING_RE.exec(line);
-  return CAST_KEYWORDS_RE.test((m ? m[1] : line).trim()) || CAST_HEADING_RE.test(line);
+  if (m) return CAST_KEYWORDS_RE.test(m[1].trim());
+  return CAST_HEADING_RE.test(line) || CAST_HEADING_RE.test(line.replace(CAST_LEADING_DECOR_RE, ''));
 }
 
 function splitCastEntry(line) {
@@ -346,7 +351,11 @@ function matchRoleAndBody(line, lookup) {
     if (rest === '') return { roleId, body: null, matchedLen: key.length };
     let m = /^[:：]\s*(.+)$/.exec(rest);
     if (m) return { roleId, body: m[1].trim(), matchedLen: key.length };
-    m = /^「(.+)」\s*$/.exec(rest);
+    // The gap before the bracket can be a real typeset space (reconstructed
+    // vertical text inserts one for any gap wider than a character pitch —
+    // see extract.js), so it has to be allowed here or this falls through to
+    // the plain-space branch below and keeps the 「」 as part of the body.
+    m = /^ *「(.+)」\s*$/.exec(rest);
     if (m) return { roleId, body: m[1].trim(), matchedLen: key.length };
     m = /^\t(.+)$/.exec(rest);
     if (m) return { roleId, body: m[1].trim(), matchedLen: key.length };
@@ -448,13 +457,18 @@ export function classifyScript(pages, confirmedRoles) {
 
       if (continuesPrevious(i)) {
         block = { type: 'unknown', text: line, confidence: 0, isContinuation: true };
-      } else if (isStageDirection(i) && !HEADING_RE.test(line) && !CUE_RE.test(line)) {
-        block = { type: 'direction', text: line, confidence: 0.85 };
       } else if (HEADING_RE.test(line)) {
         block = { type: 'heading', text: line, confidence: 0.9 };
       } else if (CUE_RE.test(line)) {
         block = { type: 'cue', text: line, confidence: 0.9 };
       } else {
+        // A confirmed role name at the head of the line is stronger evidence
+        // than layout: the indent heuristic in extract.js only estimates
+        // where a script's dialogue column sits, and on a script where
+        // stage directions and dialogue aren't set at visibly different
+        // depths that estimate can land on the wrong side for most of the
+        // page. A literal "役名「セリフ」" match doesn't have that failure
+        // mode, so it has to be tried before falling back to isStageDirection.
         const multi = canStartSpeech(i) ? matchMultiRolePrefix(line, lookup) : null;
         const single = !multi && canStartSpeech(i) ? matchRoleAndBody(line, lookup) : null;
 
@@ -462,7 +476,7 @@ export function classifyScript(pages, confirmedRoles) {
           const afterHead = toHalfWidth(line).slice(multi.matchedLen);
           const bodyText = (
             /^[:：]\s*(.+)$/.exec(afterHead) ||
-            /^「(.+)」\s*$/.exec(afterHead) ||
+            /^ *「(.+)」\s*$/.exec(afterHead) ||
             /^\t(.+)$/.exec(afterHead) ||
             /^ +(\S.*)$/.exec(afterHead)
           )?.[1]?.trim() ?? afterHead.trim();
@@ -489,6 +503,8 @@ export function classifyScript(pages, confirmedRoles) {
           } else {
             block = { type: 'unknown', text: line, confidence: 0 };
           }
+        } else if (isStageDirection(i)) {
+          block = { type: 'direction', text: line, confidence: 0.85 };
         } else if (PAREN_FULL_RE.test(line)) {
           block = { type: 'direction', text: line, confidence: 0.8 };
         } else {

@@ -89,6 +89,9 @@ export async function renderImport(app) {
     ]);
     container.appendChild(methodTabs);
 
+    const warnBox = el('div', {});
+    container.appendChild(warnBox);
+
     if (state.sourceMethod === 'file') {
       const status = el('div', { class: 'faint', style: 'text-align:center' }, '');
       const fileName = el('div', { class: 'file-name' }, '');
@@ -176,12 +179,15 @@ export async function renderImport(app) {
     container.appendChild(el('div', { style: 'height:70px' }));
 
     const nextBtn = el('button', { class: 'primary', onclick: async () => {
+      warnBox.innerHTML = '';
       try {
         nextBtn.disabled = true;
         nextBtn.textContent = '読み取り中…';
         const pages = await container._getPages();
         if (!pages.length || pages.every((p) => !p.text.trim())) {
-          throw new Error('文字を読み取れませんでした。画像だけのPDFの可能性があります。「文字を貼り付け」をお試しください。');
+          const err = new Error('文字が見つかりませんでした');
+          err.isImagePdf = true;
+          throw err;
         }
         state.pages = pages;
         state.encodingIssue = detectEncodingIssue(pages);
@@ -202,7 +208,15 @@ export async function renderImport(app) {
         }
         go('roles');
       } catch (err) {
-        toast(err.message);
+        if (err.isImagePdf) {
+          warnBox.appendChild(el('div', { class: 'note warn' }, [
+            el('strong', {}, 'このPDFは画像として保存されているようです'),
+            el('div', {}, '見た目には文字がありますが、スキャンした紙や写真をそのままPDFにしたファイルは、内部的には「絵」として保存されていて、文字のデータが入っていません。そのため自動では読み取れません。'),
+            el('div', { style: 'margin-top:6px' }, '元になった文字データ（Wordファイルなど）があれば、そちらから取り込んでください。無い場合は、Macの「プレビュー」アプリでこのPDFを開いて本文を選択・コピーするか、Googleドライブにアップロードして開くと自動で文字認識されるので、それを上の「文字を貼り付け」に貼り付けてください。'),
+          ]));
+        } else {
+          toast(err.message);
+        }
       } finally {
         nextBtn.disabled = false;
         nextBtn.textContent = '読み取って次へ →';

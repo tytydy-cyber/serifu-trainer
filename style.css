@@ -108,6 +108,11 @@ textarea { resize: vertical; min-height: 80px; }
 .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-bottom: 14px; overflow-x: auto; }
 .tabs button { flex: none; background: transparent; border: none; border-radius: 0; border-bottom: 2px solid transparent; padding: 10px 6px; color: var(--text-dim); }
 .tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+/* top is set from JS (js/views/scriptDetail.js) to the topbar's actual
+   rendered height, which varies with title length — a fixed px value here
+   would drift out of sync and collide with the topbar, same as the practice
+   screen's page marker used to. */
+.sticky-tabs { position: sticky; z-index: 9; background: var(--bg); padding-top: 4px; }
 
 .badge {
   display: inline-flex; align-items: center; gap: 4px;

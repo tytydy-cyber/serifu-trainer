@@ -26,7 +26,7 @@ export async function renderScriptDetail(app, scriptId, tab, focusBlockId) {
     el('button', { class: 'back ghost', onclick: () => { location.hash = '#/'; } }, '←'),
     el('h1', {}, script.title),
   ]);
-  const tabsEl = el('div', { class: 'tabs' }, TABS.map((t) => el('button', {
+  const tabsEl = el('div', { class: 'tabs sticky-tabs' }, TABS.map((t) => el('button', {
     class: t.id === tab ? 'active' : '',
     onclick: () => { location.hash = `#/script/${encodeURIComponent(scriptId)}/${t.id}`; },
   }, t.label)));
@@ -48,7 +48,18 @@ export async function renderScriptDetail(app, scriptId, tab, focusBlockId) {
     ? setTimeout(() => document.getElementById('focus-block')?.scrollIntoView({ block: 'center' }), 0)
     : null;
 
-  return () => { if (focusTimer) clearTimeout(focusTimer); };
+  // The topbar's own height isn't fixed — a long title wraps onto a second
+  // line — so the tab bar's sticky offset has to be measured rather than
+  // hardcoded, or it collides with the topbar exactly the way the practice
+  // screen's page marker used to.
+  const positionTabs = () => { tabsEl.style.top = `${topbar.offsetHeight}px`; };
+  positionTabs();
+  window.addEventListener('resize', positionTabs);
+
+  return () => {
+    if (focusTimer) clearTimeout(focusTimer);
+    window.removeEventListener('resize', positionTabs);
+  };
 }
 
 async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {

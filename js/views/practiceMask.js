@@ -3,12 +3,23 @@ import { el, toast } from '../ui.js';
 import { buildRoleMap, renderBlockList } from './scriptView.js';
 import { recordResult } from '../progress.js';
 
+// Kept visible even while a line is blanked out: they carry the rhythm of a
+// line (where it pauses, where it ends) without giving away any wording, so
+// hiding them behind □ only made the guess harder without testing anything.
+const PUNCTUATION_RE = /[。、！？…\s「」『』（）()・～]/;
+
+function maskTail(text) {
+  return [...text].map((ch) => (PUNCTUATION_RE.test(ch) ? ch : '□')).join('');
+}
+
 function maskLevel(text, level) {
+  // Level 0 hides the character count itself, so it stays a fixed block —
+  // showing real punctuation positions here would leak the line's length.
   if (level <= 0) return '█'.repeat(Math.min(14, Math.max(4, Math.ceil(text.length * 0.6))));
-  if (level === 1) return '□'.repeat(text.length);
+  if (level === 1) return maskTail(text);
   if (level === 2) {
     const head = text.slice(0, Math.min(3, text.length));
-    return head + '□'.repeat(Math.max(0, text.length - head.length));
+    return head + maskTail(text.slice(head.length));
   }
   if (level === 3) {
     const m = text.match(/^.*?[。！？]/);

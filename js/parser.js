@@ -406,6 +406,19 @@ function matchMultiRolePrefix(line, lookup) {
   return { roleIds, matchedLen: head.length };
 }
 
+// Strips the "A・B" name prefix a matchMultiRolePrefix match found, the same
+// way matchRoleAndBody does for a single name, leaving just the shared line.
+function buildMultiRoleLine(line, multi) {
+  const afterHead = toHalfWidth(line).slice(multi.matchedLen);
+  const bodyText = (
+    /^[:：]\s*(.+)$/.exec(afterHead) ||
+    /^ *「(.+)」\s*$/.exec(afterHead) ||
+    /^\t(.+)$/.exec(afterHead) ||
+    /^ +(\S.*)$/.exec(afterHead)
+  )?.[1]?.trim() ?? afterHead.trim();
+  return { roleIds: multi.roleIds, text: bodyText };
+}
+
 function extractInlineDirections(text) {
   const ranges = [];
   let m;
@@ -456,7 +469,23 @@ export function classifyScript(pages, confirmedRoles) {
       let block = null;
 
       if (continuesPrevious(i)) {
-        block = { type: 'unknown', text: line, confidence: 0, isContinuation: true };
+        // "Continuation" is itself a layout guess (extract.js: the previous
+        // column looked full, so this one must be the same speech running
+        // on) — and on some scripts that guess fires on short columns that
+        // aren't actually overflowing anything. A genuine continuation is
+        // just wrapped dialogue, so it never opens with someone else's role
+        // name; a line that does is a fresh speech the guess mis-flagged,
+        // and has to be read as one rather than silently glued onto whatever
+        // came before it.
+        const multi = matchMultiRolePrefix(line, lookup);
+        const single = !multi ? matchRoleAndBody(line, lookup) : null;
+        if (multi) {
+          block = { type: 'line', ...buildMultiRoleLine(line, multi), confidence: 0.9 };
+        } else if (single && single.body !== null) {
+          block = { type: 'line', roleIds: [single.roleId], text: single.body, confidence: 1.0 };
+        } else {
+          block = { type: 'unknown', text: line, confidence: 0, isContinuation: true };
+        }
       } else if (HEADING_RE.test(line)) {
         block = { type: 'heading', text: line, confidence: 0.9 };
       } else if (CUE_RE.test(line)) {
@@ -473,14 +502,7 @@ export function classifyScript(pages, confirmedRoles) {
         const single = !multi && canStartSpeech(i) ? matchRoleAndBody(line, lookup) : null;
 
         if (multi) {
-          const afterHead = toHalfWidth(line).slice(multi.matchedLen);
-          const bodyText = (
-            /^[:：]\s*(.+)$/.exec(afterHead) ||
-            /^ *「(.+)」\s*$/.exec(afterHead) ||
-            /^\t(.+)$/.exec(afterHead) ||
-            /^ +(\S.*)$/.exec(afterHead)
-          )?.[1]?.trim() ?? afterHead.trim();
-          block = { type: 'line', roleIds: multi.roleIds, text: bodyText, confidence: 0.9 };
+          block = { type: 'line', ...buildMultiRoleLine(line, multi), confidence: 0.9 };
         } else if (single && single.body !== null) {
           block = { type: 'line', roleIds: [single.roleId], text: single.body, confidence: 1.0 };
         } else if (single) {

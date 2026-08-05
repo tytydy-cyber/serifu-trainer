@@ -267,10 +267,17 @@ export function extractRoleCandidates(pages, castNames = [], options = {}) {
 
   const candidates = [...counts.entries()]
     .map(([name, { strong, weak }]) => ({ name, strong, weak, count: strong + weak }))
-    .filter((c) => c.count >= 2)
+    .map((c) => ({ ...c, castName: hasCastList ? findCastMatch(c.name, castNames) : null }))
+    // A name matched to an official cast entry is trustworthy even from a
+    // single line — a stagehand or one-line extra may only ever speak once
+    // in the whole script, and would otherwise never even reach the wizard
+    // for the user to confirm. Without a cast match, still require the
+    // pattern to repeat, since a lone space-separated match is as likely to
+    // be an ordinary sentence's first two words as a real speaker tag.
+    .filter((c) => c.count >= 2 || c.castName)
     .map((c) => {
-      const castName = hasCastList ? findCastMatch(c.name, castNames) : null;
-      const inCast = !!castName;
+      const inCast = !!c.castName;
+      const castName = c.castName;
       // With a cast list, membership is the deciding signal. Without one, fall
       // back to evidence quality: an explicit delimiter (colon/brackets/tab) is
       // a deliberate role marker and trustworthy at low counts, while the

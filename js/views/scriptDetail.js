@@ -179,7 +179,7 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId
   content.appendChild(el('p', { class: 'faint' },
     '場面の見出しの横にある「📝 メモ」から、その場面の動き（立ち位置・移動）と小道具を書き留められます。赤枠は自動判定がうまくいかなかった行です。'));
 
-  const scenes = getScenesForScript(script.id, blocks);
+  const scenes = getScenesForScript(script.id, blocks, myRoleIds);
   const hasRealScenes = !scenes[0]?.id.startsWith('virtual:');
   if (hasRealScenes) {
     const jump = el('select', {
@@ -191,7 +191,13 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId
       },
     }, [
       el('option', { value: '' }, `場面へジャンプ（${scenes.length}）`),
-      ...scenes.map((s) => el('option', { value: s.id }, `p.${s.page}　${s.label}`)),
+      // ★ marks scenes the reader actually appears in. A text marker (not
+      // just option styling) is what carries across — iOS renders <select>
+      // with its own native picker wheel that ignores most CSS on <option>.
+      ...scenes.map((s) => el('option', {
+        value: s.id,
+        style: s.hasMine ? 'font-weight:700;color:var(--role-mine)' : '',
+      }, `${s.hasMine ? '★ ' : '　 '}p.${s.page}　${s.label}`)),
     ]);
     content.appendChild(jump);
   }

@@ -107,10 +107,22 @@ export function buildRoleMap(roles) {
   return map;
 }
 
-export function getScenesForScript(scriptId, blocks) {
+// myRoleIds is optional — when given, each scene also gets `hasMine`, so a
+// caller like the scene-jump picker can flag which scenes the reader is
+// actually in without every caller (e.g. the plain scene-notes list) having
+// to know about roles at all.
+export function getScenesForScript(scriptId, blocks, myRoleIds) {
+  const isMine = (b) => myRoleIds && b.type === 'line' && b.roleIds && b.roleIds.some((r) => myRoleIds.has(r));
   const headings = blocks.filter((b) => b.type === 'heading');
   if (headings.length === 0) {
-    return [{ id: `virtual:${scriptId}`, label: '全体', page: blocks[0]?.page || 1 }];
+    const hasMine = myRoleIds ? blocks.some(isMine) : undefined;
+    return [{ id: `virtual:${scriptId}`, label: '全体', page: blocks[0]?.page || 1, hasMine }];
   }
-  return headings.map((h) => ({ id: h.id, label: h.text, page: h.page }));
+  return headings.map((h, i) => {
+    const nextOrder = headings[i + 1]?.order ?? Infinity;
+    const hasMine = myRoleIds
+      ? blocks.some((b) => b.order > h.order && b.order < nextOrder && isMine(b))
+      : undefined;
+    return { id: h.id, label: h.text, page: h.page, hasMine };
+  });
 }

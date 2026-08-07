@@ -1,6 +1,6 @@
 import { db } from '../db.js';
 import { el, toast, formatDate, confirmDialog, colorForIndex } from '../ui.js';
-import { progressForBlocks, summarize } from '../progress.js';
+import { progressForBlocks, summarize, resetProgress } from '../progress.js';
 import { computeAppearances } from '../appearances.js';
 import { renderBlockList, buildRoleMap, getScenesForScript } from './scriptView.js';
 
@@ -119,6 +119,15 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
       el('div', { class: 'row' }, [
         el('button', { class: 'primary', onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/practice/mask/${a.index}`; } }, 'マスク練習'),
         el('button', { onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/practice/voice/${a.index}`; } }, '音声稽古'),
+        total > 0 ? el('button', {
+          class: 'ghost small',
+          onclick: async () => {
+            if (!(await confirmDialog(`出番${a.index + 1}の練習記録を削除します。元に戻せません。よろしいですか？`))) return;
+            await resetProgress(myBlockIds);
+            content.innerHTML = '';
+            await renderAppearancesTab(content, script, blocks, roles, myRoleIds);
+          },
+        }, '進捗をリセット') : null,
       ]),
     ]));
   }
@@ -178,6 +187,20 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId
     '台本の全文を読み返せる画面です（編集はできません）。自分のセリフには左側に色の線が付いています。練習中に迷ったら「台本で見る」からここに戻ってこられます。'));
   content.appendChild(el('p', { class: 'faint' },
     '場面の見出しの横にある「📝 メモ」から、その場面の動き（立ち位置・移動）と小道具を書き留められます。赤枠は自動判定がうまくいかなかった行です。'));
+
+  if (myRoleIds.size > 0) {
+    content.appendChild(el('div', { class: 'row', style: 'justify-content:flex-end;margin-bottom:8px' }, [
+      el('button', {
+        class: 'ghost small',
+        onclick: async () => {
+          if (!(await confirmDialog('この台本の練習記録（言えた／怪しい／出なかった）をすべて削除します。台本自体は残ります。元に戻せません。よろしいですか？'))) return;
+          const myBlockIds = blocks.filter((b) => b.type === 'line' && b.roleIds && b.roleIds.some((r) => myRoleIds.has(r))).map((b) => b.id);
+          await resetProgress(myBlockIds);
+          toast('進捗をリセットしました');
+        },
+      }, '進捗をすべてリセット'),
+    ]));
+  }
 
   const scenes = getScenesForScript(script.id, blocks, myRoleIds);
   const hasRealScenes = !scenes[0]?.id.startsWith('virtual:');

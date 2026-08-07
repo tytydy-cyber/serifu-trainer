@@ -45,6 +45,14 @@ export async function progressForBlocks(blockIds) {
   return map;
 }
 
+// Deletes recorded progress outright rather than writing an 'unseen' row
+// over it — getProgress already treats a missing row as unseen, and this
+// way a reset script has no leftover rows to distinguish from one that was
+// simply never practiced.
+export async function resetProgress(blockIds) {
+  if (blockIds.length) await db.deleteMany('progress', blockIds);
+}
+
 export function summarize(progressList) {
   const counts = { unseen: 0, missed: 0, shaky: 0, got: 0 };
   for (const p of progressList) counts[p.status]++;

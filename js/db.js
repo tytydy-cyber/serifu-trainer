@@ -77,6 +77,10 @@ export const db = {
     const store = await tx(storeName, 'readwrite');
     return wrapReq(store.delete(key));
   },
+  async deleteMany(storeName, keys) {
+    const store = await tx(storeName, 'readwrite');
+    await Promise.all(keys.map((k) => wrapReq(store.delete(k))));
+  },
   async all(storeName) {
     const store = await tx(storeName, 'readonly');
     return wrapReq(store.getAll());

@@ -106,8 +106,37 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
     const progressMap = await progressForBlocks(myBlockIds);
     const { counts, total } = summarize([...progressMap.values()]);
 
+    const menuPanel = el('div', { class: 'card-menu-panel', style: 'display:none' }, [
+      el('button', {
+        class: 'ghost small',
+        onclick: async () => {
+          if (!(await confirmDialog(`出番${a.index + 1}の練習記録を削除します。元に戻せません。よろしいですか？`))) return;
+          await resetProgress(myBlockIds);
+          content.innerHTML = '';
+          await renderAppearancesTab(content, script, blocks, roles, myRoleIds);
+        },
+      }, '進捗をリセット'),
+      el('button', {
+        class: 'danger small',
+        onclick: async () => {
+          if (!(await confirmDialog(`出番${a.index + 1}を一覧から削除します。台本のセリフ自体は消えません。よろしいですか？`))) return;
+          await db.delete('appearances', a.id);
+          content.innerHTML = '';
+          await renderAppearancesTab(content, script, blocks, roles, myRoleIds);
+        },
+      }, '削除'),
+    ]);
+    const menuBtn = el('button', {
+      class: 'ghost small card-menu-btn',
+      onclick: () => { menuPanel.style.display = menuPanel.style.display === 'none' ? 'flex' : 'none'; },
+    }, '⋮');
+
     content.appendChild(el('div', { class: 'card' }, [
-      el('div', { class: 'faint' }, `出番${a.index + 1}　p.${a.startPage}–${a.endPage}${a.sceneHeading ? `　・　${a.sceneHeading}` : ''}`),
+      el('div', { class: 'spread' }, [
+        el('div', { class: 'faint' }, `出番${a.index + 1}　p.${a.startPage}–${a.endPage}${a.sceneHeading ? `　・　${a.sceneHeading}` : ''}`),
+        menuBtn,
+      ]),
+      menuPanel,
       el('h3', { style: 'margin:4px 0 10px' }, a.preview ? `「${a.preview}」` : `（自分のセリフなし）`),
       total > 0 ? el('div', { class: 'progress-bar', style: 'margin-bottom:8px' }, [
         el('span', { class: 'got', style: `width:${(counts.got / total) * 100}%` }),
@@ -119,15 +148,6 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
       el('div', { class: 'row' }, [
         el('button', { class: 'primary', onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/practice/mask/${a.index}`; } }, 'マスク練習'),
         el('button', { onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/practice/voice/${a.index}`; } }, '音声稽古'),
-        total > 0 ? el('button', {
-          class: 'ghost small',
-          onclick: async () => {
-            if (!(await confirmDialog(`出番${a.index + 1}の練習記録を削除します。元に戻せません。よろしいですか？`))) return;
-            await resetProgress(myBlockIds);
-            content.innerHTML = '';
-            await renderAppearancesTab(content, script, blocks, roles, myRoleIds);
-          },
-        }, '進捗をリセット') : null,
       ]),
     ]));
   }

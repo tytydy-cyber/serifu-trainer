@@ -87,6 +87,8 @@ textarea { resize: vertical; min-height: 80px; }
 .card.tappable { cursor: pointer; }
 .card.tappable:active { background: var(--bg-elevated); }
 .card.mine-scene { border-left: 3px solid var(--role-mine); background: #2b2418; }
+.card-menu-btn { padding: 2px 10px; font-size: 18px; line-height: 1; min-height: 32px; flex: none; }
+.card-menu-panel { display: flex; gap: 8px; margin: 8px 0; }
 
 .script-card h3 { margin: 0 0 4px; font-size: 16px; }
 .script-card .meta { display: flex; gap: 10px; flex-wrap: wrap; }

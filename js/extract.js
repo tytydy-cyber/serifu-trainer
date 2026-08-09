@@ -71,6 +71,13 @@ function modeHeight(items) {
 function reconstructPageLines(rawItems) {
   const items = rawItems
     .filter((it) => it.str && it.str.length > 0)
+    // A whitespace item with no height is not a glyph but a positioning
+    // artifact — most often the advance width a ruby annotation reserves
+    // beside the column it annotates. Its coordinates sit *between* columns,
+    // so leaving it in the run breaks the column at that point and splits one
+    // speech into two ("……ので川" / "上" / "りをして……"). Any real spacing is
+    // recovered by the gap checks below, which measure position directly.
+    .filter((it) => it.height || it.str.trim())
     .map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], height: it.height }));
   if (items.length === 0) return { lines: [], baseSize: 12 };
 

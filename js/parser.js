@@ -61,6 +61,12 @@ const PATTERN_E = /^([^\s:：「」（）()]{1,8})[ 　]+(\S.*)$/;
 // 歌詞は音符記号で始まり、譜割りのための空白が頻繁に入るため PATTERN_E が
 // フレーズの先頭語を話者名と誤認しやすい。
 const LYRIC_RE = /[♪♫♬]/;
+// A song opens with a note sign, and the lines under it are lyrics rather
+// than a continuation of whoever spoke last — so the marker has to start a
+// block of its own. 「♪（全員）」names its singer the way a speaker tag does;
+// 「♪【客入れ】…」 and the like name no one and are staging.
+const SONG_START_RE = /^[♪♫♬]/;
+const SONG_SINGER_RE = /^[♪♫♬]\s*[（(]([^（）()]{1,20})[）)]\s*/;
 
 // --- Cast list (登場人物表) -----------------------------------------------
 // Most scripts open with a cast list. When we can find one it is far more
@@ -364,6 +370,13 @@ function matchRoleAndBody(line, lookup) {
     // the plain-space branch below and keeps the 「」 as part of the body.
     m = /^ *「(.+)」\s*$/.exec(rest);
     if (m) return { roleId, body: m[1].trim(), matchedLen: key.length };
+    // An opening 「 the line never closes: a speech long enough to wrap onto
+    // the next column, which is where its 」 actually sits. Without this the
+    // unspaced form ("すみれ「ああ～…") matches nothing at all — the
+    // plain-space branch below needs a space it doesn't have — and the whole
+    // speech is read as narration by whoever happens to precede it.
+    m = /^ *「(.+)$/.exec(rest);
+    if (m) return { roleId, body: m[1].trim(), matchedLen: key.length };
     m = /^\t(.+)$/.exec(rest);
     if (m) return { roleId, body: m[1].trim(), matchedLen: key.length };
     m = /^ +(\S.*)$/.exec(rest);
@@ -438,14 +451,19 @@ function extractInlineDirections(text) {
 
 // pages: [{ text: string, pageNumber: number }]
 // confirmedRoles: [{ id, name, aliases }]
-export function classifyScript(pages, confirmedRoles) {
+export function classifyScript(pages, confirmedRoles, options = {}) {
   const lookup = buildAliasLookup(confirmedRoles);
+  // Pages the cast list spans (from extractCastList). They are front matter —
+  // a column of bare character names, which reads exactly like a run of
+  // role-only speech lines and otherwise gets attributed as dialogue.
+  const frontMatterPages = new Set(options.frontMatterPages || []);
   const blocks = [];
   let order = 0;
   let cursor = 0; // offset within the concatenated rawText
   const rawParts = [];
 
   for (const page of pages) {
+    const isFrontMatter = frontMatterPages.has(page.pageNumber);
     const pageLines = page.lines || page.text.split('\n').map((text) => ({ text }));
     const lines = pageLines.map((l) => l.text);
     // A line beginning at the dialogue column continues the line above it; one
@@ -475,7 +493,17 @@ export function classifyScript(pages, confirmedRoles) {
 
       let block = null;
 
-      if (continuesPrevious(i)) {
+      if (isFrontMatter) {
+        block = { type: 'direction', text: line, confidence: 0.9 };
+      } else if (SONG_START_RE.test(line)) {
+        const m = SONG_SINGER_RE.exec(line);
+        const singerId = m ? resolveAbbrRole(m[1], lookup) : null;
+        block = singerId
+          // The note sign and the singer's name are the tag, not the lyric —
+          // strip them so what gets practiced is the words that are sung.
+          ? { type: 'line', roleIds: [singerId], text: line.slice(m[0].length).trim(), confidence: 0.8 }
+          : { type: 'direction', text: line, confidence: 0.8 };
+      } else if (continuesPrevious(i)) {
         // "Continuation" is itself a layout guess (extract.js: the previous
         // column looked full, so this one must be the same speech running
         // on) — and on some scripts that guess fires on short columns that
@@ -588,7 +616,29 @@ export function classifyScript(pages, confirmedRoles) {
     cursor = lineOffset;
   }
 
+  for (const b of blocks) {
+    if (b.type !== 'line') continue;
+    const trimmed = trimSpeechQuotes(b.text);
+    if (trimmed === b.text) continue;
+    b.text = trimmed;
+    b.inlineDirections = extractInlineDirections(b.text);
+  }
+
   return blocks;
+}
+
+// A wrapped speech opens its quote in one column and closes it several
+// columns later, so only one of the pair is ever on the line the role name
+// was matched against. Whichever bracket that match consumed leaves its
+// partner stranded once the columns are folded back together — and a pair
+// that survived intact is redundant now that the speaker is a field of its
+// own. Drop the brackets in all three cases, leaving the words spoken.
+function trimSpeechQuotes(text) {
+  const t = text.trim();
+  if (t.startsWith('「') && t.endsWith('」') && !t.slice(1, -1).includes('「')) return t.slice(1, -1).trim();
+  if (t.endsWith('」') && !t.includes('「')) return t.slice(0, -1).trim();
+  if (t.startsWith('「') && !t.includes('」')) return t.slice(1).trim();
+  return t;
 }
 
 export function buildRawText(pages) {

@@ -27,6 +27,7 @@ export async function renderImport(app) {
     parentScriptId: null,
     pages: [],
     castNames: [],
+    castPages: [],
     hasCastList: false,
     candidates: [],
     groups: [],
@@ -193,6 +194,7 @@ export async function renderImport(app) {
         state.encodingIssue = detectEncodingIssue(pages);
         const cast = extractCastList(pages);
         state.castNames = cast.names;
+        state.castPages = cast.pages;
         const { candidates, groups, hasCastList } = extractRoleCandidates(pages, cast.names, { skipPages: cast.pages });
         state.candidates = candidates;
         state.groups = groups;
@@ -361,7 +363,7 @@ export async function renderImport(app) {
           toast('自分の役が選ばれていません。あとで設定タブから変更できます。');
         }
         const rolesForClassify = state.roles.map((r) => ({ id: r.tempId, name: r.name, aliases: r.aliases }));
-        state.blocks = classifyScript(state.pages, rolesForClassify);
+        state.blocks = classifyScript(state.pages, rolesForClassify, { frontMatterPages: state.castPages });
         go('fix');
       } }, '読み取り結果を見る →'),
     ]);

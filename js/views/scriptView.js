@@ -1,4 +1,4 @@
-import { el, escapeHtml } from '../ui.js';
+import { el } from '../ui.js';
 
 // Renders the full script as a scrollable block list.
 // options:

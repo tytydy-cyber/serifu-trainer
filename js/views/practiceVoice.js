@@ -1,5 +1,5 @@
 import { db } from '../db.js';
-import { el, toast } from '../ui.js';
+import { el } from '../ui.js';
 import { buildRoleMap } from './scriptView.js';
 import { recordResult } from '../progress.js';
 import { SpeechEngine, getVoices, isJapaneseTtsAvailable, stripDirectionsForSpeech } from '../tts.js';

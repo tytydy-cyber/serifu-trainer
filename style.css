@@ -86,7 +86,9 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .card.tappable { cursor: pointer; }
 .card.tappable:active { background: var(--bg-elevated); }
+/* Scenes the reader appears in, wherever they are listed. */
 .card.mine-scene { border-left: 3px solid var(--role-mine); background: #2b2418; }
+option.mine-scene { font-weight: 700; color: var(--role-mine); }
 .card-menu-btn { padding: 2px 10px; font-size: 18px; line-height: 1; min-height: 32px; flex: none; }
 .card-menu-panel { display: flex; gap: 8px; margin: 8px 0; }
 

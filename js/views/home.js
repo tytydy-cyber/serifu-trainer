@@ -1,5 +1,5 @@
 import { db } from '../db.js';
-import { el, formatDate, confirmDialog, toast } from '../ui.js';
+import { el, formatDate, toast } from '../ui.js';
 import { progressForBlocks, summarize } from '../progress.js';
 
 export async function renderHome(app) {

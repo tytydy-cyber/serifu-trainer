@@ -21,10 +21,6 @@ export function toast(msg, ms = 2200) {
   setTimeout(() => node.remove(), ms);
 }
 
-export function escapeHtml(str) {
-  return str.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 const PALETTE = ['#e0a45c', '#6fb3d9', '#c07ad9', '#7ad9a0', '#d97a9b', '#d9c26f', '#8a9fd9'];
 export function colorForIndex(i) {
   return PALETTE[i % PALETTE.length];

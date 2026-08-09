@@ -1,5 +1,5 @@
 import { db } from '../db.js';
-import { el, toast, formatDate, confirmDialog, colorForIndex } from '../ui.js';
+import { el, toast, formatDate, confirmDialog } from '../ui.js';
 import { progressForBlocks, summarize, resetProgress } from '../progress.js';
 import { computeAppearances } from '../appearances.js';
 import { renderBlockList, buildRoleMap, getScenesForScript } from './scriptView.js';
@@ -72,9 +72,13 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
   }
 
   let appearances = await db.byIndex('appearances', 'scriptId', script.id);
-  // Scripts imported before scene previews existed have appearance records
-  // without them — recompute rather than show a blank title for every card.
-  const needsRecompute = appearances.length === 0 || appearances.some((a) => a.preview === undefined);
+  // Recompute when there is nothing usable to show: no records at all, or
+  // records from before scene previews existed (which would render as a
+  // blank title on every card). Once the reader has edited the list by hand,
+  // an empty result is their choice and must not be undone — the flag is
+  // cleared in the 設定 tab, where changing roles invalidates the ranges.
+  const needsRecompute = !script.appearancesEdited
+    && (appearances.length === 0 || appearances.some((a) => a.preview === undefined));
   if (needsRecompute) {
     const ranges = computeAppearances(blocks, [...myRoleIds]);
     appearances = ranges.map((r) => ({ id: `appear_${script.id}_${r.index}`, scriptId: script.id, ...r }));
@@ -90,7 +94,13 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
   }
 
   if (appearances.length === 0) {
-    content.appendChild(el('div', { class: 'empty-state' }, '自分のセリフが見つかりませんでした。'));
+    content.appendChild(el('div', { class: 'empty-state' }, [
+      el('p', {}, script.appearancesEdited ? '出番がすべて削除されています。' : '自分のセリフが見つかりませんでした。'),
+      script.appearancesEdited ? el('button', { onclick: async () => {
+        await db.put('scripts', { ...script, appearancesEdited: false });
+        location.reload();
+      } }, '出番を計算し直す') : null,
+    ]));
     return;
   }
 
@@ -121,6 +131,8 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
         onclick: async () => {
           if (!(await confirmDialog(`出番${a.index + 1}を一覧から削除します。台本のセリフ自体は消えません。よろしいですか？`))) return;
           await db.delete('appearances', a.id);
+          script.appearancesEdited = true;
+          await db.put('scripts', script);
           content.innerHTML = '';
           await renderAppearancesTab(content, script, blocks, roles, myRoleIds);
         },
@@ -204,23 +216,9 @@ async function renderRevisionDiffCard(content, script, blocks, appearances) {
 
 function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId) {
   content.appendChild(el('p', { class: 'lead' },
-    '台本の全文を読み返せる画面です（編集はできません）。自分のセリフには左側に色の線が付いています。練習中に迷ったら「台本で見る」からここに戻ってこられます。'));
+    '台本の全文です（編集はできません）。自分のセリフには左に色の線、★の場面には自分の出番があります。'));
   content.appendChild(el('p', { class: 'faint' },
-    '場面の見出しの横にある「📝 メモ」から、その場面の動き（立ち位置・移動）と小道具を書き留められます。赤枠は自動判定がうまくいかなかった行です。'));
-
-  if (myRoleIds.size > 0) {
-    content.appendChild(el('div', { class: 'row', style: 'justify-content:flex-end;margin-bottom:8px' }, [
-      el('button', {
-        class: 'ghost small',
-        onclick: async () => {
-          if (!(await confirmDialog('この台本の練習記録（言えた／怪しい／出なかった）をすべて削除します。台本自体は残ります。元に戻せません。よろしいですか？'))) return;
-          const myBlockIds = blocks.filter((b) => b.type === 'line' && b.roleIds && b.roleIds.some((r) => myRoleIds.has(r))).map((b) => b.id);
-          await resetProgress(myBlockIds);
-          toast('進捗をリセットしました');
-        },
-      }, '進捗をすべてリセット'),
-    ]));
-  }
+    '見出しの横の「📝 メモ」でその場面の動きと小道具を書き留められます。赤枠は自動判定がうまくいかなかった行です。'));
 
   const scenes = getScenesForScript(script.id, blocks, myRoleIds);
   const hasRealScenes = !scenes[0]?.id.startsWith('virtual:');
@@ -234,12 +232,12 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId
       },
     }, [
       el('option', { value: '' }, `場面へジャンプ（${scenes.length}）`),
-      // ★ marks scenes the reader actually appears in. A text marker (not
-      // just option styling) is what carries across — iOS renders <select>
-      // with its own native picker wheel that ignores most CSS on <option>.
+      // ★ marks scenes the reader actually appears in. The marker has to be
+      // in the text, not only in the styling — iOS renders <select> with its
+      // own native picker wheel, which ignores most CSS on <option>.
       ...scenes.map((s) => el('option', {
         value: s.id,
-        style: s.hasMine ? 'font-weight:700;color:var(--role-mine)' : '',
+        class: s.hasMine ? 'mine-scene' : '',
       }, `${s.hasMine ? '★ ' : '　 '}p.${s.page}　${s.label}`)),
     ]);
     content.appendChild(jump);
@@ -290,7 +288,11 @@ function renderSettingsTab(content, script, roles, blocks) {
     const checkbox = el('input', { type: 'checkbox', checked: role.isMine, onchange: async (e) => {
       role.isMine = e.target.checked;
       await db.put('roles', role);
+      // Which lines are "mine" is what the ranges were built from, so they no
+      // longer mean anything — including any hand-editing of the list, hence
+      // clearing the flag that would otherwise suppress the recompute.
       await db.clearByIndex('appearances', 'scriptId', script.id);
+      await db.put('scripts', { ...script, appearancesEdited: false });
       toast('更新しました。出番タブで再計算されます。');
     } });
     rolesCard.appendChild(el('div', { class: 'row' }, [
@@ -303,6 +305,13 @@ function renderSettingsTab(content, script, roles, blocks) {
 
   content.appendChild(el('h3', {}, 'データ'));
   content.appendChild(el('div', { class: 'card stack' }, [
+    el('button', { onclick: async () => {
+      if (!(await confirmDialog('この台本の練習記録（言えた／怪しい／出なかった）をすべて削除します。台本自体は残ります。元に戻せません。よろしいですか？'))) return;
+      const myRoleIds = new Set(roles.filter((r) => r.isMine).map((r) => r.id));
+      await resetProgress(blocks.filter((b) => b.type === 'line' && b.roleIds && b.roleIds.some((r) => myRoleIds.has(r))).map((b) => b.id));
+      toast('進捗をリセットしました');
+    } }, '練習記録をすべてリセット'),
+    el('div', { class: 'faint' }, '出番ごとにリセットしたいときは、出番タブの各カードの「⋮」から行えます。'),
     el('button', { class: 'danger', onclick: async () => {
       if (await confirmDialog(`「${script.title}」を削除します。元に戻せません。よろしいですか？`)) {
         await db.deleteScriptCascade(script.id);

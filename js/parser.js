@@ -61,12 +61,12 @@ const PATTERN_E = /^([^\s:：「」（）()]{1,8})[ 　]+(\S.*)$/;
 // 歌詞は音符記号で始まり、譜割りのための空白が頻繁に入るため PATTERN_E が
 // フレーズの先頭語を話者名と誤認しやすい。
 const LYRIC_RE = /[♪♫♬]/;
-// A song opens with a note sign, and the lines under it are lyrics rather
-// than a continuation of whoever spoke last — so the marker has to start a
-// block of its own. 「♪（全員）」names its singer the way a speaker tag does;
-// 「♪【客入れ】…」 and the like name no one and are staging.
-const SONG_START_RE = /^[♪♫♬]/;
-const SONG_SINGER_RE = /^[♪♫♬]\s*[（(]([^（）()]{1,20})[）)]\s*/;
+// 「(役名)セリフ」— a role name wrapped in parens at the head of the line,
+// distinct from PATTERN_A–E's "role name, then a separator" shape. Scripts
+// use this for all kinds of attribution, not just a song's singer: 「♪（全
+// 員）…」, 「（ナレ）…」, a chorus line, and so on — the parens are the
+// pattern, whatever the line turns out to contain.
+const PATTERN_PAREN = /^[（(]([^（）()]{1,20})[）)]\s*(.*)$/;
 
 // --- Cast list (登場人物表) -----------------------------------------------
 // Most scripts open with a cast list. When we can find one it is far more
@@ -83,14 +83,17 @@ const CAST_HEADING_RE = /^[\s　]*(登場人物表|登場人物|人物表|人物
 // cleanly at the *next* such section instead of absorbing it as more names.
 const SECTION_HEADING_RE = /^[《【]([^》】]{1,20})[》】]$/;
 
-// Scripts often set a bullet/decoration character before the heading itself
-// ("▼登場人物"), which CAST_HEADING_RE's exact-line match would otherwise miss.
-const CAST_LEADING_DECOR_RE = /^[\s　▼▽■□●○◆◇★☆＊*・]+/;
+// A bullet/decoration character set before other content — "▼登場人物",
+// "♪おはようの歌" — carries no information of its own (which symbol a given
+// script reaches for is arbitrary) and would otherwise block whatever
+// pattern comes after it: CAST_HEADING_RE's exact-line match, or a role tag
+// in classifyScript's line matching below.
+const LEADING_DECOR_RE = /^[\s　▼▽■□●○◆◇★☆＊*・♪♫♬]+/;
 
 function isCastHeading(line) {
   const m = SECTION_HEADING_RE.exec(line);
   if (m) return CAST_KEYWORDS_RE.test(m[1].trim());
-  return CAST_HEADING_RE.test(line) || CAST_HEADING_RE.test(line.replace(CAST_LEADING_DECOR_RE, ''));
+  return CAST_HEADING_RE.test(line) || CAST_HEADING_RE.test(line.replace(LEADING_DECOR_RE, ''));
 }
 
 function splitCastEntry(line) {
@@ -253,9 +256,20 @@ export function extractRoleCandidates(pages, castNames = [], options = {}) {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
-    if (HEADING_RE.test(line) || CUE_RE.test(line) || PAREN_FULL_RE.test(line) || LYRIC_RE.test(line)) continue;
+    if (HEADING_RE.test(line) || CUE_RE.test(line) || PAREN_FULL_RE.test(line)) continue;
 
-    let m = PATTERN_A.exec(line) || PATTERN_B.exec(line) || PATTERN_D.exec(line);
+    // Checked before the lyric skip below: "(役名)" is a deliberate marker
+    // (parens, same tier as a colon or brackets) wherever it appears —
+    // including a song line ("♪（全員）…"), which is otherwise indistinguishable
+    // from any other lyric fragment and would be skipped outright next.
+    let m = PATTERN_PAREN.exec(line.replace(LEADING_DECOR_RE, ''));
+    if (m) {
+      bump(m[1].trim(), 'strong');
+      continue;
+    }
+    if (LYRIC_RE.test(line)) continue;
+
+    m = PATTERN_A.exec(line) || PATTERN_B.exec(line) || PATTERN_D.exec(line);
     if (m) {
       bump(m[1].trim(), 'strong');
       continue;
@@ -358,6 +372,11 @@ function buildAliasLookup(confirmedRoles) {
 // Returns { roleId, body } where body is null for a role-alone line (Pattern C).
 function matchRoleAndBody(line, lookup) {
   const half = toHalfWidth(line);
+  const paren = PATTERN_PAREN.exec(half);
+  if (paren) {
+    const roleId = resolveAbbrRole(paren[1], lookup);
+    if (roleId) return { roleId, body: paren[2].trim() || null, matchedLen: half.length - paren[2].length };
+  }
   for (const { key, roleId } of lookup) {
     if (!half.startsWith(key)) continue;
     const rest = half.slice(key.length);
@@ -495,14 +514,6 @@ export function classifyScript(pages, confirmedRoles, options = {}) {
 
       if (isFrontMatter) {
         block = { type: 'direction', text: line, confidence: 0.9 };
-      } else if (SONG_START_RE.test(line)) {
-        const m = SONG_SINGER_RE.exec(line);
-        const singerId = m ? resolveAbbrRole(m[1], lookup) : null;
-        block = singerId
-          // The note sign and the singer's name are the tag, not the lyric —
-          // strip them so what gets practiced is the words that are sung.
-          ? { type: 'line', roleIds: [singerId], text: line.slice(m[0].length).trim(), confidence: 0.8 }
-          : { type: 'direction', text: line, confidence: 0.8 };
       } else if (continuesPrevious(i)) {
         // "Continuation" is itself a layout guess (extract.js: the previous
         // column looked full, so this one must be the same speech running
@@ -511,11 +522,14 @@ export function classifyScript(pages, confirmedRoles, options = {}) {
         // just wrapped dialogue, so it never opens with someone else's role
         // name; a line that does is a fresh speech the guess mis-flagged,
         // and has to be read as one rather than silently glued onto whatever
-        // came before it.
-        const multi = matchMultiRolePrefix(line, lookup);
-        const single = !multi ? matchRoleAndBody(line, lookup) : null;
+        // came before it. Stripping a leading decoration mark first (♪, a
+        // bullet, …) means a line doesn't have to open with the role name
+        // literally at position 0 to be recognized as one.
+        const forMatch = line.replace(LEADING_DECOR_RE, '');
+        const multi = matchMultiRolePrefix(forMatch, lookup);
+        const single = !multi ? matchRoleAndBody(forMatch, lookup) : null;
         if (multi) {
-          block = { type: 'line', ...buildMultiRoleLine(line, multi), confidence: 0.9 };
+          block = { type: 'line', ...buildMultiRoleLine(forMatch, multi), confidence: 0.9 };
         } else if (single && single.body !== null) {
           block = { type: 'line', roleIds: [single.roleId], text: single.body, confidence: 1.0 };
         } else {
@@ -533,11 +547,14 @@ export function classifyScript(pages, confirmedRoles, options = {}) {
         // depths that estimate can land on the wrong side for most of the
         // page. A literal "役名「セリフ」" match doesn't have that failure
         // mode, so it has to be tried before falling back to isStageDirection.
-        const multi = canStartSpeech(i) ? matchMultiRolePrefix(line, lookup) : null;
-        const single = !multi && canStartSpeech(i) ? matchRoleAndBody(line, lookup) : null;
+        // A leading decoration mark (♪, a bullet, …) is stripped first so it
+        // doesn't have to sit literally at position 0 to be recognized.
+        const forMatch = line.replace(LEADING_DECOR_RE, '');
+        const multi = canStartSpeech(i) ? matchMultiRolePrefix(forMatch, lookup) : null;
+        const single = !multi && canStartSpeech(i) ? matchRoleAndBody(forMatch, lookup) : null;
 
         if (multi) {
-          block = { type: 'line', ...buildMultiRoleLine(line, multi), confidence: 0.9 };
+          block = { type: 'line', ...buildMultiRoleLine(forMatch, multi), confidence: 0.9 };
         } else if (single && single.body !== null) {
           block = { type: 'line', roleIds: [single.roleId], text: single.body, confidence: 1.0 };
         } else if (single) {
@@ -550,7 +567,8 @@ export function classifyScript(pages, confirmedRoles, options = {}) {
             const line2 = raw2.trim();
             if (!line2) break;
             if (HEADING_RE.test(line2) || CUE_RE.test(line2)) break;
-            if (canStartSpeech(j) && (matchRoleAndBody(line2, lookup) || matchMultiRolePrefix(line2, lookup))) break;
+            const line2ForMatch = line2.replace(LEADING_DECOR_RE, '');
+            if (canStartSpeech(j) && (matchRoleAndBody(line2ForMatch, lookup) || matchMultiRolePrefix(line2ForMatch, lookup))) break;
             bodyLines.push(line2);
             endOffset += raw2.length + 1;
             j++;

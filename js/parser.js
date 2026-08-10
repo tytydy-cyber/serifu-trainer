@@ -144,6 +144,13 @@ export function extractCastList(pages) {
       // the list has ended.
       const entries = splitCastEntry(line);
       if ([...line].length > 60 || entries.length === 0) break outer;
+      // A name is a label, not a sentence. If splitCastEntry had nothing to
+      // strip (no age/description in parens or after a space) and what's left
+      // still ends in sentence-final punctuation, this was never a cast entry
+      // — it's stage-direction prose that happens to follow the list with no
+      // heading of its own announcing the new section (common when the list
+      // simply ends a page and the opening stage direction starts the next).
+      if (entries.some((e) => /[。！？]$/.test(e))) break outer;
       castPages.add(page.pageNumber);
       names.push(...entries);
     }
@@ -603,10 +610,19 @@ export function classifyScript(pages, confirmedRoles, options = {}) {
       // where an abbreviation didn't resolve to a known role): that should
       // stay visible as unknown so it gets noticed and fixed, rather than
       // silently merging one character's line into another's.
+      //
+      // The same applies right after a heading: many scripts give a scene
+      // both a number and a name on consecutive lines ("シーン５" then
+      // "ラーメンは食べもの" on the next), and only the number half matches
+      // HEADING_RE. The name has nothing distinguishing it from an ordinary
+      // unmatched line, so it is the same absorption, just onto a heading
+      // instead of a line/direction — with a space, since a heading is read
+      // as a title rather than run-on prose.
       const looksLikeUnresolvedSpeaker = !block.isContinuation && MULTI_ROLE_SEP.test(line.slice(0, 6));
       const prevBlock = blocks[blocks.length - 1];
-      if (block.type === 'unknown' && !looksLikeUnresolvedSpeaker && prevBlock && (prevBlock.type === 'line' || prevBlock.type === 'direction')) {
-        prevBlock.text += block.text;
+      if (block.type === 'unknown' && !looksLikeUnresolvedSpeaker && prevBlock
+        && (prevBlock.type === 'line' || prevBlock.type === 'direction' || prevBlock.type === 'heading')) {
+        prevBlock.text += (prevBlock.type === 'heading' ? '　' : '') + block.text;
         prevBlock.srcEnd = finalSrcEnd;
         if (prevBlock.type === 'line') prevBlock.inlineDirections = extractInlineDirections(prevBlock.text);
         rawParts.push(raw);

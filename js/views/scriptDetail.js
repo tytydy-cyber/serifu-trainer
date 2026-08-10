@@ -116,7 +116,12 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
     const progressMap = await progressForBlocks(myBlockIds);
     const { counts, total } = summarize([...progressMap.values()]);
 
+    const firstBlock = blocks.find((b) => b.order === a.startOrder);
     const menuPanel = el('div', { class: 'card-menu-panel', style: 'display:none' }, [
+      firstBlock ? el('button', {
+        class: 'ghost small',
+        onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/view/${encodeURIComponent(firstBlock.id)}`; },
+      }, '台本で見る') : null,
       el('button', {
         class: 'ghost small',
         onclick: async () => {

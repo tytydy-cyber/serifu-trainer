@@ -1,8 +1,12 @@
 import { db } from '../db.js';
-import { el, formatDate, toast } from '../ui.js';
+import { el, formatDate, toast, confirmDialog } from '../ui.js';
 import { progressForBlocks, summarize } from '../progress.js';
 
 export async function renderHome(app) {
+  let selectMode = false;
+  const selected = new Set();
+  const checkboxRows = [];
+
   const topbar = el('div', { class: 'topbar' }, [
     el('h1', {}, 'セリフトレーナー'),
     el('button', { class: 'ghost', onclick: () => exportBackup() }, '書き出し'),
@@ -24,9 +28,41 @@ export async function renderHome(app) {
       el('p', { class: 'faint' }, '自分の役を選ぶと出番（自分のセリフが続くまとまり）ごとに区切られ、セリフを隠して覚える練習と、相手のセリフを読み上げる音声稽古ができます。'),
     ]));
   } else {
+    const deleteBtn = el('button', { class: 'danger small', style: 'display:none' }, '選択した台本を削除');
+    const selectToggleBtn = el('button', { class: 'ghost small' }, '選択して削除');
+
+    function updateDeleteBtn() {
+      deleteBtn.textContent = `選択した台本を削除（${selected.size}）`;
+      deleteBtn.disabled = selected.size === 0;
+    }
+
+    selectToggleBtn.addEventListener('click', () => {
+      selectMode = !selectMode;
+      selected.clear();
+      for (const row of checkboxRows) {
+        row.style.display = selectMode ? 'flex' : 'none';
+        row.querySelector('input').checked = false;
+      }
+      selectToggleBtn.textContent = selectMode ? 'キャンセル' : '選択して削除';
+      deleteBtn.style.display = selectMode ? 'inline-flex' : 'none';
+      updateDeleteBtn();
+    });
+
+    deleteBtn.addEventListener('click', async () => {
+      if (selected.size === 0) return;
+      if (!(await confirmDialog(`選択した${selected.size}件の台本を削除します。元に戻せません。よろしいですか？`))) return;
+      for (const id of selected) await db.deleteScriptCascade(id);
+      toast('削除しました');
+      location.hash = '#/';
+      location.reload();
+    });
+
+    page.appendChild(el('div', { class: 'row', style: 'justify-content:flex-end;gap:8px;margin-bottom:10px' }, [deleteBtn, selectToggleBtn]));
+
     const list = el('div', { class: 'stack' });
     for (const s of scripts) {
-      const card = await renderScriptCard(s);
+      const { card, checkboxRow } = await renderScriptCard(s, () => selectMode, selected, updateDeleteBtn);
+      checkboxRows.push(checkboxRow);
       list.appendChild(card);
     }
     page.appendChild(list);
@@ -61,7 +97,7 @@ export async function renderHome(app) {
   return () => { importInput.remove(); };
 }
 
-async function renderScriptCard(script) {
+async function renderScriptCard(script, isSelectMode, selected, onSelectionChange) {
   const roles = await db.byIndex('roles', 'scriptId', script.id);
   const blocks = await db.byIndex('blocks', 'scriptId', script.id);
   const myRoleIds = new Set(roles.filter((r) => r.isMine).map((r) => r.id));
@@ -73,7 +109,24 @@ async function renderScriptCard(script) {
     ? Math.ceil((script.performanceDate - Date.now()) / (24 * 60 * 60 * 1000))
     : null;
 
-  const card = el('div', { class: 'card script-card tappable', onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}`; } }, [
+  const checkbox = el('input', { type: 'checkbox', onchange: (e) => {
+    if (e.target.checked) selected.add(script.id); else selected.delete(script.id);
+    onSelectionChange();
+  } });
+  const checkboxRow = el('label', { class: 'row mine-check', style: 'display:none;margin-bottom:8px' }, [checkbox, '選択']);
+
+  const card = el('div', {
+    class: 'card script-card tappable',
+    onclick: (e) => {
+      if (isSelectMode()) {
+        if (e.target !== checkbox) checkbox.checked = !checkbox.checked;
+        checkbox.dispatchEvent(new Event('change'));
+        return;
+      }
+      location.hash = `#/script/${encodeURIComponent(script.id)}`;
+    },
+  }, [
+    checkboxRow,
     el('h3', {}, script.title || '無題の台本'),
     el('div', { class: 'meta faint' }, [
       script.revision ? el('span', {}, script.revision) : null,
@@ -89,7 +142,7 @@ async function renderScriptCard(script) {
       el('span', { class: 'unseen', style: `width:${(counts.unseen / total) * 100}%` }),
     ]) : null,
   ]);
-  return card;
+  return { card, checkboxRow };
 }
 
 async function exportBackup() {

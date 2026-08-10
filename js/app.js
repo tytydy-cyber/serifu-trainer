@@ -4,6 +4,7 @@ import { renderScriptDetail } from './views/scriptDetail.js';
 import { renderSceneNotes } from './views/sceneNotes.js';
 import { renderPracticeMask } from './views/practiceMask.js';
 import { renderPracticeVoice } from './views/practiceVoice.js';
+import { renderReviewBlocks } from './views/reviewBlocks.js';
 
 const app = document.getElementById('app');
 
@@ -32,6 +33,8 @@ async function route() {
       const scriptId = decodeURIComponent(parts[1]);
       if (parts[2] === 'scene' && parts[3]) {
         currentCleanup = await renderSceneNotes(app, scriptId, decodeURIComponent(parts[3]));
+      } else if (parts[2] === 'review') {
+        currentCleanup = await renderReviewBlocks(app, scriptId);
       } else if (parts[2] === 'practice' && parts[3] === 'mask' && parts[4] !== undefined) {
         currentCleanup = await renderPracticeMask(app, scriptId, Number(parts[4]));
       } else if (parts[2] === 'practice' && parts[3] === 'voice' && parts[4] !== undefined) {

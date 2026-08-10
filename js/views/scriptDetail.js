@@ -1,5 +1,5 @@
-import { db } from '../db.js';
-import { el, toast, formatDate, confirmDialog } from '../ui.js';
+import { db, uid } from '../db.js';
+import { el, toast, formatDate, confirmDialog, colorForIndex } from '../ui.js';
 import { progressForBlocks, summarize, resetProgress } from '../progress.js';
 import { computeAppearances } from '../appearances.js';
 import { renderBlockList, buildRoleMap, getScenesForScript } from './scriptView.js';
@@ -290,6 +290,13 @@ function renderSettingsTab(content, script, roles, blocks) {
   content.appendChild(el('h3', {}, '役の設定'));
   const rolesCard = el('div', { class: 'card stack' });
   for (const role of roles) {
+    const nameInput = el('input', { type: 'text', value: role.name, style: 'flex:1', onchange: async (e) => {
+      const name = e.target.value.trim();
+      if (!name) { e.target.value = role.name; return; }
+      role.name = name;
+      await db.put('roles', role);
+      toast('役名を更新しました');
+    } });
     const checkbox = el('input', { type: 'checkbox', checked: role.isMine, onchange: async (e) => {
       role.isMine = e.target.checked;
       await db.put('roles', role);
@@ -301,12 +308,33 @@ function renderSettingsTab(content, script, roles, blocks) {
       toast('更新しました。出番タブで再計算されます。');
     } });
     rolesCard.appendChild(el('div', { class: 'row' }, [
-      el('span', { class: 'dot', style: `background:${role.color};width:10px;height:10px;border-radius:50%;display:inline-block` }),
-      el('div', { style: 'flex:1' }, role.name),
+      el('span', { class: 'dot', style: `background:${role.color};width:10px;height:10px;border-radius:50%;display:inline-block;flex:none` }),
+      nameInput,
       el('label', { class: 'row', style: 'width:auto' }, [checkbox, '自分の役']),
     ]));
   }
+  const newRoleInput = el('input', { type: 'text', placeholder: '追加する役名' });
+  rolesCard.appendChild(el('div', { class: 'row' }, [
+    newRoleInput,
+    el('button', { class: 'ghost', onclick: async () => {
+      const name = newRoleInput.value.trim();
+      if (!name) return;
+      const role = { id: uid('role'), scriptId: script.id, name, aliases: [], isMine: false, color: colorForIndex(roles.length) };
+      await db.put('roles', role);
+      toast('役を追加しました。分類の見直しから、該当するセリフに割り当ててください。');
+      location.hash = `#/script/${encodeURIComponent(script.id)}/settings`;
+      location.reload();
+    } }, '＋ 役を追加'),
+  ]));
   content.appendChild(rolesCard);
+  content.appendChild(el('p', { class: 'faint' },
+    '見つからなかった役や、名前を間違えた役はここで直せます。取り込んだ文章そのものの再判定は「分類を見直す」から行えます。'));
+
+  content.appendChild(el('h3', {}, '取り込み結果'));
+  content.appendChild(el('div', { class: 'card stack' }, [
+    el('button', { onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/review`; } }, '分類を見直す'),
+    el('div', { class: 'faint' }, '「要確認」の行や、役の判定が間違っている行を、あとから直せます。'),
+  ]));
 
   content.appendChild(el('h3', {}, 'データ'));
   content.appendChild(el('div', { class: 'card stack' }, [

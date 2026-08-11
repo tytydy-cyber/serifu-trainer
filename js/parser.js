@@ -425,6 +425,23 @@ function matchRoleAndBody(line, lookup) {
 
 const MULTI_ROLE_SEP = /[・／\/＆&]/;
 
+// True if `line` opens with one of the names the wizard found while scanning
+// for role candidates — including ones the reader left unchecked (a walk-on
+// part with a single line, say). Those names never made it into `lookup`
+// (built only from confirmed roles), so matchRoleAndBody can't attribute the
+// line to anyone — but the line is still a fresh speech, not a fragment of
+// whatever came before it, and must not be folded into the previous block.
+function looksLikeFreshSpeaker(line, knownNames) {
+  if (!knownNames || knownNames.size === 0) return false;
+  const half = toHalfWidth(line);
+  for (const name of knownNames) {
+    if (!name || !half.startsWith(name)) continue;
+    const rest = half.slice(name.length);
+    if (rest === '' || /^[:：\t]/.test(rest) || /^ *「/.test(rest) || /^ +\S/.test(rest) || /^[…‥]/.test(rest)) return true;
+  }
+  return false;
+}
+
 // A name inside "A＆B" is often shorter than that role's usual attribution
 // elsewhere (姉＆麺 for 姉＆麺太郎) — the simultaneous-line tag only needs to
 // be unambiguous, not the full name. Resolve it the same way an abbreviated
@@ -487,6 +504,7 @@ function extractInlineDirections(text) {
 // confirmedRoles: [{ id, name, aliases }]
 export function classifyScript(pages, confirmedRoles, options = {}) {
   const lookup = buildAliasLookup(confirmedRoles);
+  const knownNames = options.knownNames || new Set();
   // Pages the cast list spans (from extractCastList). They are front matter —
   // a column of bare character names, which reads exactly like a run of
   // role-only speech lines and otherwise gets attributed as dialogue.
@@ -626,7 +644,8 @@ export function classifyScript(pages, confirmedRoles, options = {}) {
       // unmatched line, so it is the same absorption, just onto a heading
       // instead of a line/direction — with a space, since a heading is read
       // as a title rather than run-on prose.
-      const looksLikeUnresolvedSpeaker = !block.isContinuation && MULTI_ROLE_SEP.test(line.slice(0, 6));
+      const looksLikeUnresolvedSpeaker = !block.isContinuation
+        && (MULTI_ROLE_SEP.test(line.slice(0, 6)) || looksLikeFreshSpeaker(line, knownNames));
       const prevBlock = blocks[blocks.length - 1];
       if (block.type === 'unknown' && !looksLikeUnresolvedSpeaker && prevBlock
         && (prevBlock.type === 'line' || prevBlock.type === 'direction' || prevBlock.type === 'heading')) {

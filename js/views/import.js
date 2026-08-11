@@ -372,7 +372,12 @@ export async function renderImport(app) {
           toast('自分の役が選ばれていません。あとで設定タブから変更できます。');
         }
         const rolesForClassify = state.roles.map((r) => ({ id: r.tempId, name: r.name, aliases: r.aliases }));
-        state.blocks = classifyScript(state.pages, rolesForClassify, { frontMatterPages: state.castPages });
+        // Every name the wizard ever suspected of being a role, whether the
+        // reader kept it checked or not — a walk-on part's line still has to
+        // be recognized as a fresh speech rather than swallowed into whoever
+        // spoke before it. See looksLikeFreshSpeaker in parser.js.
+        const knownNames = new Set(state.candidates.map((c) => c.name));
+        state.blocks = classifyScript(state.pages, rolesForClassify, { frontMatterPages: state.castPages, knownNames });
         go('fix');
       } }, '読み取り結果を見る →'),
     ]);

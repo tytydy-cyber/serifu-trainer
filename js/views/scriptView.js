@@ -7,16 +7,22 @@ import { el } from '../ui.js';
 //   focusBlockId      string — scroll to this block and mark it
 //   onSceneNoteClick  (headingBlock) => void
 //   rangeStart/rangeEnd — restrict to a range of block orders
+//   filterRoleIds     Set — when non-empty, show only these roles' lines
+//                      (plus headings, kept as landmarks)
 export function renderBlockList(blocks, roleMap, options = {}) {
   const {
     highlightRoleIds = new Set(), maskRoleIds, focusBlockId,
-    onSceneNoteClick, rangeStart, rangeEnd,
+    onSceneNoteClick, rangeStart, rangeEnd, filterRoleIds,
   } = options;
   const list = el('div', { class: 'block-list' });
   let lastPage = null;
 
   for (const b of blocks) {
     if (rangeStart != null && (b.order < rangeStart || b.order > rangeEnd)) continue;
+    if (filterRoleIds && filterRoleIds.size && b.type !== 'heading') {
+      const matches = b.type === 'line' && b.roleIds && b.roleIds.some((r) => filterRoleIds.has(r));
+      if (!matches) continue;
+    }
 
     if (b.page !== lastPage) {
       list.appendChild(el('div', { class: 'sticky-page-header' }, `p.${b.page}`));

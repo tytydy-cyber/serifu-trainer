@@ -31,7 +31,7 @@ export async function renderPracticeVoice(app, scriptId, appearanceIndex) {
     shell.appendChild(el('div', { class: 'page' }, [
       el('div', { class: 'card' }, [
         el('p', {}, 'この端末には日本語の読み上げ音声が見つかりませんでした。'),
-        el('p', { class: 'faint' }, '端末の設定から日本語の音声合成データを追加すると使えるようになります。それまではマスク練習をご利用ください。'),
+        el('p', { class: 'faint' }, '端末の設定から日本語の音声合成データを追加すると使えるようになります。それまではマスク稽古をご利用ください。'),
       ]),
       el('button', { class: 'primary', onclick: () => { location.hash = `#/script/${encodeURIComponent(scriptId)}/appearances`; } }, '出番一覧へ戻る'),
     ]));

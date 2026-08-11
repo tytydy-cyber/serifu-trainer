@@ -172,7 +172,7 @@ export async function renderImport(app) {
         el('label', {}, [
           el('div', { class: 'field-label' }, '改訂元の台本（任意）'),
           parentSelect,
-          el('div', { class: 'faint' }, '台本が改訂されたときに選ぶと、変わらなかったセリフの練習記録を引き継ぎ、変わった箇所だけをあとで確認できます。'),
+          el('div', { class: 'faint' }, '台本が改訂されたときに選ぶと、変わらなかったセリフの稽古記録を引き継ぎ、変わった箇所だけをあとで確認できます。'),
         ]),
       ]));
     }
@@ -268,15 +268,24 @@ export async function renderImport(app) {
       const sel = state.selections.get(c.name);
       const checkbox = el('input', { type: 'checkbox', checked: sel.included, onchange: (e) => { sel.included = e.target.checked; } });
       const nameInput = el('input', { type: 'text', value: sel.primaryName, oninput: (e) => { sel.primaryName = e.target.value; } });
-      return el('label', { class: 'role-candidate' }, [
+      const label = el('label', { class: 'role-candidate' }, [
         checkbox,
         el('div', { class: 'name' }, [
           el('div', {}, c.name),
-          el('div', { class: 'faint' }, `セリフ ${c.count} 回`),
+          el('div', { class: 'faint' }, c.onlyOnce
+            ? `セリフ ${c.count} 回　・　1回しか登場しないため既定ではチェックを外しています`
+            : `セリフ ${c.count} 回`),
         ]),
         el('span', { class: 'faint' }, '→'),
         nameInput,
       ]);
+      const occurrences = c.occurrences && c.occurrences.length
+        ? el('details', { class: 'role-occurrences' }, [
+            el('summary', {}, `台本内の登場箇所を見る（${c.occurrences.length}件${c.occurrences.length < c.count ? '・先頭のみ' : ''}）`),
+            el('div', {}, c.occurrences.map((o) => el('div', { class: 'role-occurrence-row' }, `p.${o.page}　${o.text}`))),
+          ])
+        : null;
+      return occurrences ? el('div', {}, [label, occurrences]) : label;
     };
 
     if (listed.length) {
@@ -320,7 +329,7 @@ export async function renderImport(app) {
   function renderRoleConfirmStep() {
     const container = el('div', { class: 'stack' });
     container.appendChild(el('p', { class: 'lead' },
-      'あなたが演じる役にチェックを入れてください。ここで選んだ役のセリフが、練習のときに隠されます。'));
+      'あなたが演じる役にチェックを入れてください。ここで選んだ役のセリフが、稽古のときに隠されます。'));
     container.appendChild(el('p', { class: 'faint' },
       '一人で二役を演じる場合は、両方にチェックを入れてください。あとから「設定」タブで変更できます。'));
 
@@ -390,7 +399,7 @@ export async function renderImport(app) {
       '「要確認」だけ表示する',
     ]));
     container.appendChild(el('p', { class: 'faint' },
-      '「要確認」は、役のセリフともト書きとも判断できなかった行です。多くはタイトルや登場人物表など本文以外の部分なので、そのままでも練習には影響しません。前後の行も薄く表示しているので、流れを見て判断してください。'));
+      '「要確認」は、役のセリフともト書きとも判断できなかった行です。多くはタイトルや登場人物表など本文以外の部分なので、そのままでも稽古には影響しません。前後の行も薄く表示しているので、流れを見て判断してください。'));
 
     const list = el('div', { class: 'block-list' });
     container.appendChild(list);

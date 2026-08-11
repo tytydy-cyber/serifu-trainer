@@ -198,7 +198,7 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
     targetArea.innerHTML = '';
     const total = results.got + results.shaky + results.missed;
     targetArea.appendChild(el('div', { class: 'stack' }, [
-      el('h3', { style: 'margin:0' }, 'この出番の練習は完了です'),
+      el('h3', { style: 'margin:0' }, 'この出番の稽古は完了です'),
       el('div', { class: 'row wrap' }, [
         el('span', { class: 'badge' }, `言えた ${results.got}`),
         el('span', { class: 'badge' }, `怪しい ${results.shaky}`),

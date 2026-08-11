@@ -240,8 +240,7 @@ function speakerLines(pages) {
 export function extractRoleCandidates(pages, castNames = [], options = {}) {
   const skipPages = new Set(options.skipPages || []);
   const lines = speakerLines(pages)
-    .filter((l) => l.canNameRole && !skipPages.has(l.page))
-    .map((l) => l.text);
+    .filter((l) => l.canNameRole && !skipPages.has(l.page));
   const hasCastList = castNames.length >= 2;
   // Each candidate tracks two kinds of evidence separately: "strong" comes from
   // an explicit delimiter (colon / brackets / tab — a deliberate role marker),
@@ -250,18 +249,20 @@ export function extractRoleCandidates(pages, castNames = [], options = {}) {
   // (a lyric phrase, an emphasis pause, ...). Weak-only candidates need more
   // repetition before we default them to "included" in the wizard.
   const counts = new Map();
-  const bump = (rawName, kind) => {
+  const MAX_OCCURRENCES = 20; // enough for the review screen without holding a whole leading role's line count
+  const bump = (rawName, kind, page, snippet) => {
     // Ellipses and stray separators cling to the speaker label when a script
     // writes "太郎……" for a pause; fold those into the plain name.
     const name = rawName.replace(/^[…‥・\s]+|[…‥・\s]+$/g, '');
     if (!name || STOPWORDS.has(name)) return;
-    const entry = counts.get(name) || { strong: 0, weak: 0 };
+    const entry = counts.get(name) || { strong: 0, weak: 0, occurrences: [] };
     entry[kind] += 1;
+    if (entry.occurrences.length < MAX_OCCURRENCES) entry.occurrences.push({ page, text: snippet.slice(0, 60) });
     counts.set(name, entry);
   };
 
-  for (const raw of lines) {
-    const line = raw.trim();
+  for (const lineObj of lines) {
+    const line = lineObj.text.trim();
     if (!line) continue;
     if (HEADING_RE.test(line) || CUE_RE.test(line) || PAREN_FULL_RE.test(line)) continue;
 
@@ -271,29 +272,29 @@ export function extractRoleCandidates(pages, castNames = [], options = {}) {
     // from any other lyric fragment and would be skipped outright next.
     let m = PATTERN_PAREN.exec(line.replace(LEADING_DECOR_RE, ''));
     if (m) {
-      bump(m[1].trim(), 'strong');
+      bump(m[1].trim(), 'strong', lineObj.page, line);
       continue;
     }
     if (LYRIC_RE.test(line)) continue;
 
     m = PATTERN_A.exec(line) || PATTERN_B.exec(line) || PATTERN_D.exec(line);
     if (m) {
-      bump(m[1].trim(), 'strong');
+      bump(m[1].trim(), 'strong', lineObj.page, line);
       continue;
     }
     m = PATTERN_E.exec(line);
     if (m) {
-      bump(m[1].trim(), 'weak');
+      bump(m[1].trim(), 'weak', lineObj.page, line);
       continue;
     }
     // Pattern C candidate: a short standalone line (role-only line style)
     if (line.length <= 10 && !/[。、！？.!?]/.test(line)) {
-      bump(line, 'weak');
+      bump(line, 'weak', lineObj.page, line);
     }
   }
 
   const candidates = [...counts.entries()]
-    .map(([name, { strong, weak }]) => ({ name, strong, weak, count: strong + weak }))
+    .map(([name, { strong, weak, occurrences }]) => ({ name, strong, weak, count: strong + weak, occurrences }))
     .map((c) => ({ ...c, castName: hasCastList ? findCastMatch(c.name, castNames) : null }))
     // A name matched to an official cast entry is trustworthy even from a
     // single line — a stagehand or one-line extra may only ever speak once
@@ -315,12 +316,19 @@ export function extractRoleCandidates(pages, castNames = [], options = {}) {
       // A one-character candidate matches far too easily (any stray particle
       // sits inside some cast entry), so require real recurrence on top.
       if ([...c.name].length <= 1 && c.count < (inCast ? 5 : 10)) defaultInclude = false;
+      // A role that only ever speaks once is easy to include by mistake (a
+      // stray word matched, or a walk-on part not worth tracking progress
+      // for) — still show it, but make the reader opt in rather than out.
+      const onlyOnce = c.count <= 1;
+      if (onlyOnce) defaultInclude = false;
       return {
         name: c.name,
         count: Math.round(c.count * 10) / 10,
         defaultInclude,
+        onlyOnce,
         inCast,
         castName,
+        occurrences: c.occurrences,
       };
     })
     .sort((a, b) => b.count - a.count);

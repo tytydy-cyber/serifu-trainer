@@ -105,9 +105,9 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
   }
 
   content.appendChild(el('p', { class: 'lead' },
-    '自分のセリフが続くまとまりごとに「出番」に区切ってあります。今日さらう場面を選んで練習してください。'));
+    '自分のセリフが続くまとまりごとに「出番」に区切ってあります。今日さらう場面を選んで稽古してください。'));
   content.appendChild(el('p', { class: 'faint' },
-    'マスク練習は自分のセリフを隠して思い出す練習、音声稽古は相手のセリフを読み上げて実際に声に出す練習です。'));
+    'マスク稽古は自分のセリフを隠して思い出す稽古、音声稽古は相手のセリフを読み上げて実際に声に出す稽古です。'));
 
   for (const a of appearances) {
     const myBlockIds = blocks
@@ -125,7 +125,7 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
       el('button', {
         class: 'ghost small',
         onclick: async () => {
-          if (!(await confirmDialog(`出番${a.index + 1}の練習記録を削除します。元に戻せません。よろしいですか？`))) return;
+          if (!(await confirmDialog(`出番${a.index + 1}の稽古記録を削除します。元に戻せません。よろしいですか？`))) return;
           await resetProgress(myBlockIds);
           content.innerHTML = '';
           await renderAppearancesTab(content, script, blocks, roles, myRoleIds);
@@ -161,9 +161,9 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
         el('span', { class: 'missed', style: `width:${(counts.missed / total) * 100}%` }),
         el('span', { class: 'unseen', style: `width:${(counts.unseen / total) * 100}%` }),
       ]) : null,
-      el('div', { class: 'faint', style: 'margin-bottom:10px' }, `自分のセリフ ${a.myLineCount}本${total > 0 ? `（言えた ${counts.got} ・ 怪しい ${counts.shaky} ・ 出なかった ${counts.missed} ・ 未練習 ${counts.unseen}）` : '（まだ練習していません）'}`),
+      el('div', { class: 'faint', style: 'margin-bottom:10px' }, `自分のセリフ ${a.myLineCount}本${total > 0 ? `（言えた ${counts.got} ・ 怪しい ${counts.shaky} ・ 出なかった ${counts.missed} ・ 未稽古 ${counts.unseen}）` : '（まだ稽古していません）'}`),
       el('div', { class: 'row' }, [
-        el('button', { class: 'primary', onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/practice/mask/${a.index}`; } }, 'マスク練習'),
+        el('button', { class: 'primary', onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/practice/mask/${a.index}`; } }, 'マスク稽古'),
         el('button', { onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/practice/voice/${a.index}`; } }, '音声稽古'),
       ]),
     ]));
@@ -205,7 +205,7 @@ async function renderRevisionDiffCard(content, script, blocks, appearances) {
   content.appendChild(el('div', { class: 'note ok' }, [
     el('strong', {}, parent ? `「${parent.title}」からの改訂版です` : '改訂版として取り込まれています'),
     el('div', {}, `変更 ${d.modifiedCount}　・　追加 ${d.addedCount}　・　削除 ${d.deletedCount}　・　変更なし ${d.unchangedCount}`),
-    el('div', { class: 'faint', style: 'margin-top:2px' }, '変更のなかったセリフは、以前の練習記録をそのまま引き継いでいます。変更されたセリフは「怪しい」として登録し直しました。'),
+    el('div', { class: 'faint', style: 'margin-top:2px' }, '変更のなかったセリフは、以前の稽古記録をそのまま引き継いでいます。変更されたセリフは「怪しい」として登録し直しました。'),
     affected.length ? el('div', { class: 'row wrap', style: 'margin-top:10px' },
       affected.map((a) => el('button', {
         class: 'ghost small',
@@ -223,7 +223,7 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId
   content.appendChild(el('p', { class: 'lead' },
     '台本の全文です（編集はできません）。自分のセリフには左に色の線、★の場面には自分の出番があります。'));
   content.appendChild(el('p', { class: 'faint' },
-    '見出しの横の「📝 メモ」でその場面の動きと小道具を書き留められます。赤枠は自動判定がうまくいかなかった行です。'));
+    '見出しの横の「📝 メモ」でその場面の動きと小道具を書き留められます。赤枠は自動判定がうまくいかなかった行です。役名のボタンを押すと、そのセリフだけに絞り込めます（複数選択可）。'));
 
   const scenes = getScenesForScript(script.id, blocks, myRoleIds);
   const hasRealScenes = !scenes[0]?.id.startsWith('virtual:');
@@ -248,18 +248,36 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId
     content.appendChild(jump);
   }
 
-  const legend = el('div', { class: 'row wrap', style: 'margin: 12px 0' }, [...roleMap.values()].map((r) => el('span', { class: 'badge' }, [
-    el('span', { class: 'dot', style: `background:${r.color};width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px` }),
-    r.name + (r.isMine ? '（自分）' : ''),
-  ])));
-  content.appendChild(legend);
+  const filterRoleIds = new Set();
+  const listWrap = el('div', {});
 
-  const list = renderBlockList(blocks, roleMap, {
-    highlightRoleIds: myRoleIds,
-    focusBlockId,
-    onSceneNoteClick: (heading) => { location.hash = `#/script/${encodeURIComponent(script.id)}/scene/${encodeURIComponent(heading.id)}`; },
-  });
-  content.appendChild(list);
+  const legend = el('div', { class: 'row wrap', style: 'margin: 12px 0' }, [...roleMap.values()].map((r) => {
+    const btn = el('button', {
+      class: 'badge role-filter-btn',
+      onclick: () => {
+        if (filterRoleIds.has(r.id)) filterRoleIds.delete(r.id); else filterRoleIds.add(r.id);
+        btn.classList.toggle('active', filterRoleIds.has(r.id));
+        renderList();
+      },
+    }, [
+      el('span', { class: 'dot', style: `background:${r.color};width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px` }),
+      r.name + (r.isMine ? '（自分）' : ''),
+    ]);
+    return btn;
+  }));
+  content.appendChild(legend);
+  content.appendChild(listWrap);
+
+  function renderList() {
+    listWrap.innerHTML = '';
+    listWrap.appendChild(renderBlockList(blocks, roleMap, {
+      highlightRoleIds: myRoleIds,
+      focusBlockId,
+      filterRoleIds,
+      onSceneNoteClick: (heading) => { location.hash = `#/script/${encodeURIComponent(script.id)}/scene/${encodeURIComponent(heading.id)}`; },
+    }));
+  }
+  renderList();
 }
 
 function renderNotesTab(content, script, blocks, myRoleIds) {
@@ -307,10 +325,25 @@ function renderSettingsTab(content, script, roles, blocks) {
       await db.put('scripts', { ...script, appearancesEdited: false });
       toast('更新しました。出番タブで再計算されます。');
     } });
+    const deleteBtn = el('button', { class: 'ghost small danger', onclick: async () => {
+      if (!(await confirmDialog(`役「${role.name}」を削除します。この役に割り当てられているセリフは「役未設定」に戻ります。元に戻せません。よろしいですか？`))) return;
+      const affected = blocks.filter((b) => b.roleIds && b.roleIds.includes(role.id));
+      if (affected.length) {
+        await db.putMany('blocks', affected.map((b) => ({ ...b, roleIds: b.roleIds.filter((id) => id !== role.id) })));
+      }
+      await db.delete('roles', role.id);
+      if (role.isMine) {
+        await db.clearByIndex('appearances', 'scriptId', script.id);
+        await db.put('scripts', { ...script, appearancesEdited: false });
+      }
+      toast('役を削除しました');
+      location.reload();
+    } }, '削除');
     rolesCard.appendChild(el('div', { class: 'row' }, [
       el('span', { class: 'dot', style: `background:${role.color};width:10px;height:10px;border-radius:50%;display:inline-block;flex:none` }),
       nameInput,
       el('label', { class: 'row', style: 'width:auto' }, [checkbox, '自分の役']),
+      deleteBtn,
     ]));
   }
   const newRoleInput = el('input', { type: 'text', placeholder: '追加する役名' });
@@ -339,11 +372,11 @@ function renderSettingsTab(content, script, roles, blocks) {
   content.appendChild(el('h3', {}, 'データ'));
   content.appendChild(el('div', { class: 'card stack' }, [
     el('button', { onclick: async () => {
-      if (!(await confirmDialog('この台本の練習記録（言えた／怪しい／出なかった）をすべて削除します。台本自体は残ります。元に戻せません。よろしいですか？'))) return;
+      if (!(await confirmDialog('この台本の稽古記録（言えた／怪しい／出なかった）をすべて削除します。台本自体は残ります。元に戻せません。よろしいですか？'))) return;
       const myRoleIds = new Set(roles.filter((r) => r.isMine).map((r) => r.id));
       await resetProgress(blocks.filter((b) => b.type === 'line' && b.roleIds && b.roleIds.some((r) => myRoleIds.has(r))).map((b) => b.id));
       toast('進捗をリセットしました');
-    } }, '練習記録をすべてリセット'),
+    } }, '稽古記録をすべてリセット'),
     el('div', { class: 'faint' }, '出番ごとにリセットしたいときは、出番タブの各カードの「⋮」から行えます。'),
     el('button', { class: 'danger', onclick: async () => {
       if (await confirmDialog(`「${script.title}」を削除します。元に戻せません。よろしいですか？`)) {

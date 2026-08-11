@@ -23,7 +23,7 @@ export async function renderSceneNotes(app, scriptId, sceneId) {
   }
 
   const topbar = el('div', { class: 'topbar' }, [
-    el('button', { class: 'back ghost', onclick: () => { location.hash = `#/script/${encodeURIComponent(scriptId)}/notes`; } }, '←'),
+    el('button', { class: 'back ghost', onclick: () => { location.hash = `#/script/${encodeURIComponent(scriptId)}/view`; } }, '←'),
     el('h1', {}, scene.label),
   ]);
   const page = el('div', { class: 'page' });

@@ -7,7 +7,6 @@ import { renderBlockList, buildRoleMap, getScenesForScript } from './scriptView.
 const TABS = [
   { id: 'appearances', label: '出番' },
   { id: 'view', label: '台本' },
-  { id: 'notes', label: 'メモ' },
   { id: 'settings', label: '設定' },
 ];
 
@@ -39,7 +38,6 @@ export async function renderScriptDetail(app, scriptId, tab, focusBlockId) {
 
   if (tab === 'appearances') await renderAppearancesTab(content, script, blocks, roles, myRoleIds);
   else if (tab === 'view') renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId);
-  else if (tab === 'notes') renderNotesTab(content, script, blocks, myRoleIds);
   else renderSettingsTab(content, script, roles, blocks);
 
   // Scroll to the line we came in for, after the router has done its own
@@ -251,12 +249,14 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId
   const filterRoleIds = new Set();
   const listWrap = el('div', {});
 
-  const legend = el('div', { class: 'row wrap', style: 'margin: 12px 0' }, [...roleMap.values()].map((r) => {
+  const summary = el('summary', {}, `役で絞り込む（${roleMap.size}人）`);
+  const legendBody = el('div', { class: 'row wrap', style: 'margin: 8px 0 4px' }, [...roleMap.values()].map((r) => {
     const btn = el('button', {
       class: 'badge role-filter-btn',
       onclick: () => {
         if (filterRoleIds.has(r.id)) filterRoleIds.delete(r.id); else filterRoleIds.add(r.id);
         btn.classList.toggle('active', filterRoleIds.has(r.id));
+        updateSummary();
         renderList();
       },
     }, [
@@ -265,8 +265,15 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId
     ]);
     return btn;
   }));
+  const legend = el('details', { class: 'role-filter-details' }, [summary, legendBody]);
   content.appendChild(legend);
   content.appendChild(listWrap);
+
+  function updateSummary() {
+    summary.textContent = filterRoleIds.size
+      ? `役で絞り込む中（${filterRoleIds.size}人選択）`
+      : `役で絞り込む（${roleMap.size}人）`;
+  }
 
   function renderList() {
     listWrap.innerHTML = '';
@@ -278,24 +285,6 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId
     }));
   }
   renderList();
-}
-
-function renderNotesTab(content, script, blocks, myRoleIds) {
-  const scenes = getScenesForScript(script.id, blocks, myRoleIds);
-  content.appendChild(el('p', { class: 'lead' },
-    '場面ごとに、動き（立ち位置・移動）と小道具をメモできます。'));
-  content.appendChild(el('p', { class: 'faint' },
-    '稽古で決まった段取りをその場で書き留めておくと、次の稽古前にここだけ見返せます。場面を選んで開いてください。★は自分が出る場面です。'));
-  const list = el('div', { class: 'stack' });
-  for (const s of scenes) {
-    list.appendChild(el('div', { class: `card tappable ${s.hasMine ? 'mine-scene' : ''}`, onclick: () => { location.hash = `#/script/${encodeURIComponent(script.id)}/scene/${encodeURIComponent(s.id)}`; } }, [
-      el('div', { class: 'spread' }, [
-        el('div', {}, `${s.hasMine ? '★ ' : ''}${s.label}`),
-        el('span', { class: 'faint' }, `p.${s.page}`),
-      ]),
-    ]));
-  }
-  content.appendChild(list);
 }
 
 function renderSettingsTab(content, script, roles, blocks) {
@@ -339,11 +328,15 @@ function renderSettingsTab(content, script, roles, blocks) {
       toast('役を削除しました');
       location.reload();
     } }, '削除');
-    rolesCard.appendChild(el('div', { class: 'row' }, [
-      el('span', { class: 'dot', style: `background:${role.color};width:10px;height:10px;border-radius:50%;display:inline-block;flex:none` }),
-      nameInput,
-      el('label', { class: 'row', style: 'width:auto' }, [checkbox, '自分の役']),
-      deleteBtn,
+    rolesCard.appendChild(el('div', { class: 'role-row' }, [
+      el('div', { class: 'role-row-main' }, [
+        el('span', { class: 'role-dot', style: `background:${role.color}` }),
+        nameInput,
+      ]),
+      el('div', { class: 'role-row-sub' }, [
+        el('label', { class: 'mine-check' }, [checkbox, '自分の役']),
+        deleteBtn,
+      ]),
     ]));
   }
   const newRoleInput = el('input', { type: 'text', placeholder: '追加する役名' });

@@ -79,7 +79,7 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
     wholeArea.innerHTML = '';
     wholeArea.appendChild(el('p', { class: 'faint' },
       'この出番の全文です。自分のセリフだけ伏せてあります。伏せ字をタップすると、その1本だけ開きます。'));
-    wholeArea.appendChild(el('div', { class: 'row', style: 'margin-bottom:12px' }, [
+    wholeArea.appendChild(el('div', { class: 'sticky-toolbar row' }, [
       el('button', { onclick: () => wholeArea.querySelectorAll('.masked').forEach((n) => n.click()) }, 'すべて開く'),
       el('button', { onclick: renderWhole }, 'すべて伏せる'),
     ]));
@@ -89,7 +89,17 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
       maskRoleIds: myRoleIds,
     });
     wholeArea.appendChild(list);
+    positionToolbar();
   }
+
+  // Same reasoning as scriptDetail's positionTabs: the topbar's height isn't
+  // fixed (a long appearance label wraps), so the toolbar's stick point has
+  // to be measured rather than guessed.
+  const positionToolbar = () => {
+    const toolbar = wholeArea.querySelector('.sticky-toolbar');
+    if (toolbar) toolbar.style.top = `${topbar.offsetHeight}px`;
+  };
+  window.addEventListener('resize', positionToolbar);
 
   let cursor = 0;
   let contextBlocks = [];
@@ -214,5 +224,5 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
 
   step();
   renderMode();
-  return () => {};
+  return () => { window.removeEventListener('resize', positionToolbar); };
 }

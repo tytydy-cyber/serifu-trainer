@@ -49,8 +49,13 @@ export async function renderScriptDetail(app, scriptId, tab, focusBlockId) {
   // The topbar's own height isn't fixed — a long title wraps onto a second
   // line — so the tab bar's sticky offset has to be measured rather than
   // hardcoded, or it collides with the topbar exactly the way the practice
-  // screen's page marker used to.
-  const positionTabs = () => { tabsEl.style.top = `${topbar.offsetHeight}px`; };
+  // screen's page marker used to. The 台本 tab's own sticky toolbar (the
+  // scene-jump picker) stacks below both, so it needs the combined height.
+  const positionTabs = () => {
+    tabsEl.style.top = `${topbar.offsetHeight}px`;
+    const toolbar = content.querySelector('.sticky-toolbar');
+    if (toolbar) toolbar.style.top = `${topbar.offsetHeight + tabsEl.offsetHeight}px`;
+  };
   positionTabs();
   window.addEventListener('resize', positionTabs);
 
@@ -227,7 +232,6 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId
   const hasRealScenes = !scenes[0]?.id.startsWith('virtual:');
   if (hasRealScenes) {
     const jump = el('select', {
-      style: 'margin-bottom:12px',
       onchange: (e) => {
         if (!e.target.value) return;
         document.getElementById(`scene-${e.target.value}`)?.scrollIntoView({ block: 'start' });
@@ -243,7 +247,7 @@ function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId
         class: s.hasMine ? 'mine-scene' : '',
       }, `${s.hasMine ? '★ ' : '　 '}p.${s.page}　${s.label}`)),
     ]);
-    content.appendChild(jump);
+    content.appendChild(el('div', { class: 'sticky-toolbar' }, [jump]));
   }
 
   const filterRoleIds = new Set();

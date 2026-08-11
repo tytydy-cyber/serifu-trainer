@@ -118,6 +118,10 @@ option.mine-scene { font-weight: 700; color: var(--role-mine); }
    would drift out of sync and collide with the topbar, same as the practice
    screen's page marker used to. */
 .sticky-tabs { position: sticky; z-index: 9; background: var(--bg); padding-top: 4px; }
+/* Shared by the 台本 tab's scene-jump picker and the マスク稽古 通し表示
+   mode's すべて開く/伏せる row — both stick below whatever sits above them,
+   with the exact offset measured in JS the same way sticky-tabs is. */
+.sticky-toolbar { position: sticky; z-index: 8; background: var(--bg); padding: 8px 0; }
 
 .badge {
   display: inline-flex; align-items: center; gap: 4px;
@@ -126,8 +130,8 @@ option.mine-scene { font-weight: 700; color: var(--role-mine); }
   border: 1px solid var(--border);
 }
 .badge.role { color: #15141a; font-weight: 700; }
-button.role-filter-btn { min-height: 32px; }
-button.role-filter-btn.active { background: var(--accent); color: #1a1610; border-color: var(--accent); font-weight: 700; }
+button.role-filter-btn, button.type-filter-btn { min-height: 32px; }
+button.role-filter-btn.active, button.type-filter-btn.active { background: var(--accent); color: #1a1610; border-color: var(--accent); font-weight: 700; }
 .role-filter-details { margin: 12px 0; }
 .role-filter-details summary { cursor: pointer; font-size: 14px; color: var(--text-dim); padding: 6px 0; }
 .role-filter-details[open] summary { color: var(--text); font-weight: 600; }

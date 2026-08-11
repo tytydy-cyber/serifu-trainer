@@ -393,18 +393,13 @@ export async function renderImport(app) {
 
     container.appendChild(el('p', { class: 'lead' },
       '読み取り結果です。このまま保存しても使えます。おかしな行があれば、種類や役をその場で直せます。'));
-
-    container.appendChild(el('div', { class: 'card' }, [
-      el('div', { class: 'row wrap' }, Object.entries(counts).map(([t, n]) => el('span', { class: 'badge' }, `${TYPE_LABELS[t]} ${n}`))),
-    ]));
-
-    let onlyIssues = counts.unknown > 0;
-    container.appendChild(el('label', { class: 'row' }, [
-      el('input', { type: 'checkbox', checked: onlyIssues, onchange: (e) => { onlyIssues = e.target.checked; renderList(); } }),
-      '「要確認」だけ表示する',
-    ]));
     container.appendChild(el('p', { class: 'faint' },
-      '「要確認」は、役のセリフともト書きとも判断できなかった行です。多くはタイトルや登場人物表など本文以外の部分なので、そのままでも稽古には影響しません。前後の行も薄く表示しているので、流れを見て判断してください。'));
+      'ボタンをタップすると、その種類だけに絞り込めます。「要確認」は、役のセリフともト書きとも判断できなかった行で、多くはタイトルや登場人物表など本文以外の部分です。前後の行も薄く表示します。'));
+
+    const countsRow = el('div', { class: 'row wrap' });
+    container.appendChild(el('div', { class: 'card' }, [countsRow]));
+
+    let typeFilter = counts.unknown > 0 ? 'unknown' : null;
 
     const list = el('div', { class: 'block-list' });
     container.appendChild(list);
@@ -413,12 +408,24 @@ export async function renderImport(app) {
 
     function isIssue(b) { return b.type === 'unknown' || b.confidence < 0.6; }
 
+    function renderCounts() {
+      countsRow.innerHTML = '';
+      for (const [t, n] of Object.entries(counts)) {
+        countsRow.appendChild(el('button', {
+          class: `badge type-filter-btn ${typeFilter === t ? 'active' : ''}`,
+          onclick: () => { typeFilter = typeFilter === t ? null : t; renderList(); },
+        }, `${TYPE_LABELS[t]} ${n}`));
+      }
+    }
+
     function renderList() {
+      renderCounts();
       list.innerHTML = '';
-      if (!onlyIssues) {
-        state.blocks.forEach((b) => list.appendChild(renderFixRow(b)));
+      if (typeFilter !== 'unknown') {
+        const filtered = typeFilter ? state.blocks.filter((b) => b.type === typeFilter) : state.blocks;
+        filtered.forEach((b) => list.appendChild(renderFixRow(b)));
         if (list.children.length === 0) {
-          list.appendChild(el('div', { class: 'empty-state' }, '直すべき行はありません。そのまま保存できます。'));
+          list.appendChild(el('div', { class: 'empty-state' }, typeFilter ? '該当する行はありません。' : '直すべき行はありません。そのまま保存できます。'));
         }
         return;
       }

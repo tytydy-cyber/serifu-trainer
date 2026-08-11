@@ -28,17 +28,13 @@ export async function renderReviewBlocks(app, scriptId) {
 
   page.appendChild(el('p', { class: 'lead' },
     '取り込み時に自動で判定した種類や役を、あとからここで直せます。変更するとすぐに保存されます。'));
+  page.appendChild(el('p', { class: 'faint' },
+    'ボタンをタップすると、その種類だけに絞り込めます。「要確認」は、役のセリフともト書きとも判断できなかった行で、前後の行も薄く表示します。'));
 
   const countsRow = el('div', { class: 'row wrap' });
   page.appendChild(el('div', { class: 'card' }, [countsRow]));
 
-  let onlyIssues = blocks.some(isIssue);
-  page.appendChild(el('label', { class: 'row' }, [
-    el('input', { type: 'checkbox', checked: onlyIssues, onchange: (e) => { onlyIssues = e.target.checked; renderList(); } }),
-    '「要確認」だけ表示する',
-  ]));
-  page.appendChild(el('p', { class: 'faint' },
-    '「要確認」は、役のセリフともト書きとも判断できなかった行です。前後の行も薄く表示しているので、流れを見て判断してください。'));
+  let typeFilter = blocks.some(isIssue) ? 'unknown' : null;
 
   const list = el('div', { class: 'block-list' });
   page.appendChild(list);
@@ -62,36 +58,46 @@ export async function renderReviewBlocks(app, scriptId) {
     const counts = { heading: 0, cue: 0, line: 0, direction: 0, unknown: 0 };
     for (const b of blocks) counts[b.type]++;
     countsRow.innerHTML = '';
-    for (const [t, n] of Object.entries(counts)) countsRow.appendChild(el('span', { class: 'badge' }, `${TYPE_LABELS[t]} ${n}`));
+    for (const [t, n] of Object.entries(counts)) {
+      countsRow.appendChild(el('button', {
+        class: `badge type-filter-btn ${typeFilter === t ? 'active' : ''}`,
+        onclick: () => { typeFilter = typeFilter === t ? null : t; renderList(); },
+      }, `${TYPE_LABELS[t]} ${n}`));
+    }
   }
 
   function renderList() {
     renderCounts();
     list.innerHTML = '';
-    if (!onlyIssues) {
-      blocks.forEach((b) => list.appendChild(renderRow(b)));
+    if (typeFilter === 'unknown') {
+      const flaggedIdx = [];
+      blocks.forEach((b, i) => { if (isIssue(b)) flaggedIdx.push(i); });
+      if (flaggedIdx.length === 0) {
+        list.appendChild(el('div', { class: 'empty-state' }, '直すべき行はありません。'));
+        return;
+      }
+      let lastShownIdx = -1;
+      for (const idx of flaggedIdx) {
+        const from = Math.max(0, idx - CONTEXT);
+        const to = Math.min(blocks.length - 1, idx + CONTEXT);
+        if (lastShownIdx >= 0 && from > lastShownIdx + 1) {
+          list.appendChild(el('div', { class: 'faint', style: 'text-align:center;margin:14px 0' }, '……'));
+        }
+        const start = Math.max(from, lastShownIdx + 1);
+        for (let i = start; i <= to; i++) {
+          if (i === idx) list.appendChild(renderRow(blocks[i]));
+          else if (i > lastShownIdx) list.appendChild(renderContextRow(blocks[i]));
+        }
+        lastShownIdx = Math.max(lastShownIdx, to);
+      }
       return;
     }
-    const flaggedIdx = [];
-    blocks.forEach((b, i) => { if (isIssue(b)) flaggedIdx.push(i); });
-    if (flaggedIdx.length === 0) {
-      list.appendChild(el('div', { class: 'empty-state' }, '直すべき行はありません。'));
+    const filtered = typeFilter ? blocks.filter((b) => b.type === typeFilter) : blocks;
+    if (filtered.length === 0) {
+      list.appendChild(el('div', { class: 'empty-state' }, '該当する行はありません。'));
       return;
     }
-    let lastShownIdx = -1;
-    for (const idx of flaggedIdx) {
-      const from = Math.max(0, idx - CONTEXT);
-      const to = Math.min(blocks.length - 1, idx + CONTEXT);
-      if (lastShownIdx >= 0 && from > lastShownIdx + 1) {
-        list.appendChild(el('div', { class: 'faint', style: 'text-align:center;margin:14px 0' }, '……'));
-      }
-      const start = Math.max(from, lastShownIdx + 1);
-      for (let i = start; i <= to; i++) {
-        if (i === idx) list.appendChild(renderRow(blocks[i]));
-        else if (i > lastShownIdx) list.appendChild(renderContextRow(blocks[i]));
-      }
-      lastShownIdx = Math.max(lastShownIdx, to);
-    }
+    filtered.forEach((b) => list.appendChild(renderRow(b)));
   }
 
   function renderContextRow(b) {

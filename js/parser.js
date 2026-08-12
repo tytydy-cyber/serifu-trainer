@@ -664,11 +664,19 @@ export function classifyScript(pages, confirmedRoles, options = {}) {
       // unmatched line, so it is the same absorption, just onto a heading
       // instead of a line/direction — with a space, since a heading is read
       // as a title rather than run-on prose.
+      //
+      // An unknown block is itself a valid fold target, not just line/
+      // direction/heading: a monologue whose columns extract.js never
+      // recognized as forced continuations (the "cut off, so it must
+      // overflow" heuristic missing a short column) opens with one
+      // unrecognized-speaker fragment and would otherwise shred into one
+      // stray unknown row per column instead of staying one legible,
+      // fixable 要確認 block — worse for the reader than fewer, longer ones.
       const looksLikeUnresolvedSpeaker = !block.isContinuation
         && (MULTI_ROLE_SEP.test(line.slice(0, 6)) || looksLikeFreshSpeaker(line, knownNames));
       const prevBlock = blocks[blocks.length - 1];
       if (block.type === 'unknown' && !looksLikeUnresolvedSpeaker && prevBlock
-        && (prevBlock.type === 'line' || prevBlock.type === 'direction' || prevBlock.type === 'heading')) {
+        && (prevBlock.type === 'line' || prevBlock.type === 'direction' || prevBlock.type === 'heading' || prevBlock.type === 'unknown')) {
         prevBlock.text += (prevBlock.type === 'heading' ? '　' : '') + block.text;
         prevBlock.srcEnd = finalSrcEnd;
         if (prevBlock.type === 'line') prevBlock.inlineDirections = extractInlineDirections(prevBlock.text);

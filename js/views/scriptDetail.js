@@ -50,11 +50,16 @@ export async function renderScriptDetail(app, scriptId, tab, focusBlockId) {
   // line — so the tab bar's sticky offset has to be measured rather than
   // hardcoded, or it collides with the topbar exactly the way the practice
   // screen's page marker used to. The 台本 tab's own sticky toolbar (the
-  // scene-jump picker) stacks below both, so it needs the combined height.
+  // scene-jump picker) stacks below both, so it needs the combined height —
+  // which is also how far a scrolled-to block (--scroll-offset, read by
+  // style.css's scroll-margin-top) needs to stay clear of the top edge, or
+  // scrollIntoView tucks it behind this same stack of sticky bars.
   const positionTabs = () => {
     tabsEl.style.top = `${topbar.offsetHeight}px`;
     const toolbar = content.querySelector('.sticky-toolbar');
+    const stickyHeight = topbar.offsetHeight + tabsEl.offsetHeight + (toolbar ? toolbar.offsetHeight : 0);
     if (toolbar) toolbar.style.top = `${topbar.offsetHeight + tabsEl.offsetHeight}px`;
+    page.style.setProperty('--scroll-offset', `${stickyHeight}px`);
   };
   positionTabs();
   window.addEventListener('resize', positionTabs);

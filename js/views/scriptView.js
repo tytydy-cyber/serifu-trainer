@@ -29,12 +29,19 @@ export function renderBlockList(blocks, roleMap, options = {}) {
       lastPage = b.page;
     }
 
+    // computeAppearances anchors an 出番 a couple of blocks before the
+    // reader's own first line, for lead-in context — that anchor can land on
+    // any block type, not just a heading or a line, so every branch below
+    // has to be able to carry the focus id or "台本で見る" silently fails to
+    // scroll (staying wherever the router's own scroll-to-top left it).
+    const isFocus = focusBlockId && b.id === focusBlockId;
+    const focusId = isFocus ? 'focus-block' : undefined;
+
     if (b.type === 'heading') {
-      const isFocus = focusBlockId && b.id === focusBlockId;
       // Every heading gets a stable, predictable id (not just the focused
       // one) so the scene-jump picker can scroll straight to it without a
       // full route change.
-      const row = el('div', { class: `row heading-row ${isFocus ? 'focus' : ''}`, id: isFocus ? 'focus-block' : `scene-${b.id}`, style: 'justify-content:center;align-items:center;gap:10px' }, [
+      const row = el('div', { class: `row heading-row ${isFocus ? 'focus' : ''}`, id: focusId || `scene-${b.id}`, style: 'justify-content:center;align-items:center;gap:10px' }, [
         el('div', { class: 'block heading', style: 'margin:0' }, b.text),
         onSceneNoteClick ? el('button', { class: 'ghost', style: 'min-height:32px;padding:4px 10px;font-size:13px', onclick: () => onSceneNoteClick(b) }, '📝 メモ') : null,
       ]);
@@ -42,11 +49,11 @@ export function renderBlockList(blocks, roleMap, options = {}) {
       continue;
     }
     if (b.type === 'cue') {
-      list.appendChild(el('div', { class: 'block cue' }, b.text));
+      list.appendChild(el('div', { class: `block cue ${isFocus ? 'focus' : ''}`, id: focusId }, b.text));
       continue;
     }
     if (b.type === 'direction') {
-      list.appendChild(el('div', { class: 'block direction' }, b.text));
+      list.appendChild(el('div', { class: `block direction ${isFocus ? 'focus' : ''}`, id: focusId }, b.text));
       continue;
     }
     if (b.type === 'line') {
@@ -54,7 +61,6 @@ export function renderBlockList(blocks, roleMap, options = {}) {
       const shouldMask = maskRoleIds && b.roleIds && b.roleIds.some((r) => maskRoleIds.has(r));
       const roleNames = (b.roleIds || []).map((rid) => roleMap.get(rid)?.name || '?').join('・');
       const roleColor = b.roleIds && roleMap.get(b.roleIds[0]) ? roleMap.get(b.roleIds[0]).color : '#888';
-      const isFocus = focusBlockId && b.id === focusBlockId;
 
       const body = shouldMask
         ? el('div', {
@@ -69,19 +75,18 @@ export function renderBlockList(blocks, roleMap, options = {}) {
           }, '█'.repeat(Math.min(20, Math.max(4, Math.ceil([...b.text].length * 0.7)))))
         : el('div', {}, renderLineText(b));
 
-      const node = el('div', { class: `block line ${isMine ? 'mine' : ''} ${isFocus ? 'focus' : ''}` }, [
+      const node = el('div', { class: `block line ${isMine ? 'mine' : ''} ${isFocus ? 'focus' : ''}`, id: focusId }, [
         el('div', { class: 'role-name' }, [
           el('span', { class: 'dot', style: `background:${roleColor}` }),
           roleNames || '（役未設定）',
         ]),
         body,
       ]);
-      if (isFocus) node.id = 'focus-block';
       list.appendChild(node);
       continue;
     }
     // unknown
-    list.appendChild(el('div', { class: 'block unknown' }, [
+    list.appendChild(el('div', { class: `block unknown ${isFocus ? 'focus' : ''}`, id: focusId }, [
       el('div', { class: 'faint' }, '要確認'),
       el('div', {}, b.text),
     ]));

@@ -1,5 +1,5 @@
-import { db } from '../db.js';
-import { el, confirmDialog } from '../ui.js';
+import { db, uid } from '../db.js';
+import { el, confirmDialog, colorForIndex } from '../ui.js';
 import { extractInlineDirections } from '../parser.js';
 import { resetProgress } from '../progress.js';
 
@@ -172,7 +172,37 @@ export async function renderReviewBlocks(app, scriptId) {
       },
     }, '↑ 結合') : null;
 
+    // This line only sits in 要確認 because nobody checked the box for a
+    // name the candidate scan already found (e.g. a walk-on the reader left
+    // unchecked at 役名を確認) — offer to register it as a role and
+    // attribute the line in one tap instead of retyping the name.
+    const suggestion = b.type === 'unknown' && b.suggestedRoleName ? el('div', { class: 'note ok' }, [
+      el('div', {}, `候補：「${b.suggestedRoleName}」の役かもしれません`),
+      el('button', {
+        class: 'ghost small',
+        style: 'margin-top:6px',
+        onclick: async () => {
+          let role = roles.find((r) => r.name === b.suggestedRoleName);
+          if (!role) {
+            role = { id: uid('role'), scriptId: script.id, name: b.suggestedRoleName, aliases: [], isMine: false, color: colorForIndex(roles.length) };
+            roles.push(role);
+            await db.put('roles', role);
+          }
+          b.type = 'line';
+          b.roleIds = [role.id];
+          if (b.suggestedBody && b.suggestedBody.trim()) b.text = b.suggestedBody;
+          b.confidence = 0.9;
+          b.suggestedRoleName = undefined;
+          b.suggestedBody = undefined;
+          await db.put('blocks', b);
+          await invalidateAppearancesOnce();
+          renderList();
+        },
+      }, `「${b.suggestedRoleName}」を役にして割り当てる`),
+    ]) : null;
+
     return el('div', { class: `card ${b.confidence < 0.6 ? 'block unknown' : ''}` }, [
+      suggestion,
       el('div', { class: 'row wrap', style: 'margin-bottom:8px' }, [
         el('span', { class: 'page-tag' }, `p.${b.page}`),
         typeSelect,

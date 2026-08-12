@@ -450,15 +450,33 @@ const MULTI_ROLE_SEP = /[・／\/＆&]/;
 // its comment — so this rarely fires on a genuine wrapped continuation).
 // A false split here just leaves an extra 要確認 row to dismiss; a false
 // fold silently corrupts and misattributes two speeches, which is worse.
-function looksLikeFreshSpeaker(line, knownNames) {
+// If `line` opens with one of `knownNames` followed by a real separator
+// (colon, brackets, a tab, a wide gap, an opening ellipsis), returns the
+// matched name and the rest of the line as body text — the same shape
+// matchRoleAndBody resolves for a *confirmed* role, just without a roleId
+// since this name was never checked into one. Exported so the fix screens
+// can offer "turn this into a role" on a block that landed in 要確認 only
+// because nobody confirmed a name the wizard already knew about.
+export function matchKnownNamePrefix(line, knownNames) {
+  if (!knownNames) return null;
   const half = toHalfWidth(line);
-  if (knownNames) {
-    for (const name of knownNames) {
-      if (!name || !half.startsWith(name)) continue;
-      const rest = half.slice(name.length);
-      if (rest === '' || /^[:：\t]/.test(rest) || /^ *「/.test(rest) || /^ +\S/.test(rest) || /^[…‥]/.test(rest)) return true;
-    }
+  for (const name of knownNames) {
+    if (!name || !half.startsWith(name)) continue;
+    const rest = half.slice(name.length);
+    if (rest === '') return { name, body: '' };
+    if (/^[:：\t]/.test(rest)) return { name, body: rest.slice(1).trim() };
+    let m = /^ *「(.+)」?\s*$/.exec(rest);
+    if (m) return { name, body: m[1].trim() };
+    m = /^ +(\S.*)$/.exec(rest);
+    if (m) return { name, body: m[1].trim() };
+    m = /^([…‥]+) *(.*)$/.exec(rest);
+    if (m) return { name, body: (m[1] + m[2]).trim() };
   }
+  return null;
+}
+
+function looksLikeFreshSpeaker(line, knownNames) {
+  if (matchKnownNamePrefix(line, knownNames)) return true;
   return PATTERN_A.test(line) || PATTERN_B.test(line) || PATTERN_D.test(line) || PATTERN_E.test(line);
 }
 
@@ -674,6 +692,14 @@ export function classifyScript(pages, confirmedRoles, options = {}) {
       // fixable 要確認 block — worse for the reader than fewer, longer ones.
       const looksLikeUnresolvedSpeaker = !block.isContinuation
         && (MULTI_ROLE_SEP.test(line.slice(0, 6)) || looksLikeFreshSpeaker(line, knownNames));
+      // Unlike the generic shape check, a knownNames match names an actual
+      // candidate — surface it so the fix screens can offer "make 受付 a
+      // role and assign this line to them" instead of leaving the reader to
+      // retype a name the wizard already showed them once.
+      if (block.type === 'unknown' && looksLikeUnresolvedSpeaker) {
+        const known = matchKnownNamePrefix(line, knownNames);
+        if (known) { block.suggestedRoleName = known.name; block.suggestedBody = known.body; }
+      }
       const prevBlock = blocks[blocks.length - 1];
       if (block.type === 'unknown' && !looksLikeUnresolvedSpeaker && prevBlock
         && (prevBlock.type === 'line' || prevBlock.type === 'direction' || prevBlock.type === 'heading' || prevBlock.type === 'unknown')) {
@@ -696,6 +722,8 @@ export function classifyScript(pages, confirmedRoles, options = {}) {
         srcStart,
         srcEnd: finalSrcEnd,
         confidence: block.confidence,
+        suggestedRoleName: block.suggestedRoleName,
+        suggestedBody: block.suggestedBody,
       });
 
       rawParts.push(raw);

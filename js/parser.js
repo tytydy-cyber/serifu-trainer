@@ -510,7 +510,7 @@ function buildMultiRoleLine(line, multi) {
   return { roleIds: multi.roleIds, text: bodyText };
 }
 
-function extractInlineDirections(text) {
+export function extractInlineDirections(text) {
   const ranges = [];
   let m;
   INLINE_PAREN_RE.lastIndex = 0;

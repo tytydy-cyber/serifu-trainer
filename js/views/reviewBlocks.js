@@ -1,5 +1,7 @@
 import { db } from '../db.js';
-import { el } from '../ui.js';
+import { el, confirmDialog } from '../ui.js';
+import { extractInlineDirections } from '../parser.js';
+import { resetProgress } from '../progress.js';
 
 // Reopens the import wizard's 仕上げ step against blocks already saved to
 // the database, so a classification miss found after the fact (a heading
@@ -76,6 +78,13 @@ export async function renderReviewBlocks(app, scriptId) {
         list.appendChild(el('div', { class: 'empty-state' }, '直すべき行はありません。'));
         return;
       }
+      // A run of flagged rows closer together than CONTEXT (a song's
+      // lyrics, say — every line its own 要確認) has each one fall inside
+      // the previous one's window. Rendering only "the row THIS window is
+      // centered on" as editable then silently drops a later flagged row to
+      // read-only context — exactly the rows a reader most needs the 結合
+      // button on — so membership in the full flagged set decides instead.
+      const flaggedSet = new Set(flaggedIdx);
       let lastShownIdx = -1;
       for (const idx of flaggedIdx) {
         const from = Math.max(0, idx - CONTEXT);
@@ -85,8 +94,8 @@ export async function renderReviewBlocks(app, scriptId) {
         }
         const start = Math.max(from, lastShownIdx + 1);
         for (let i = start; i <= to; i++) {
-          if (i === idx) list.appendChild(renderRow(blocks[i]));
-          else if (i > lastShownIdx) list.appendChild(renderContextRow(blocks[i]));
+          if (flaggedSet.has(i)) list.appendChild(renderRow(blocks[i]));
+          else list.appendChild(renderContextRow(blocks[i]));
         }
         lastShownIdx = Math.max(lastShownIdx, to);
       }
@@ -140,11 +149,35 @@ export async function renderReviewBlocks(app, scriptId) {
       onchange: async (e) => { b.text = e.target.value; await db.put('blocks', b); },
     }, b.text);
 
+    // A monologue extract.js didn't recognize as column overflow (or a
+    // song's rhythm-spaced lyric lines, which no line-by-line rule can tell
+    // apart from a genuine one-off role cue) shreds into several rows in
+    // sequence. Merging one back into its predecessor is the fast way to
+    // put it back together by hand.
+    const idx = blocks.indexOf(b);
+    const mergeBtn = idx > 0 ? el('button', {
+      class: 'ghost small',
+      title: '直前の行と結合します',
+      onclick: async () => {
+        const prev = blocks[idx - 1];
+        if (!(await confirmDialog(`この行を直前の行「${prev.text.slice(0, 20)}${prev.text.length > 20 ? '…' : ''}」に結合します。元に戻せません。よろしいですか？`))) return;
+        prev.text += b.text;
+        if (prev.type === 'line') prev.inlineDirections = extractInlineDirections(prev.text);
+        await db.put('blocks', prev);
+        await db.delete('blocks', b.id);
+        await resetProgress([b.id]);
+        blocks.splice(idx, 1);
+        await invalidateAppearancesOnce();
+        renderList();
+      },
+    }, '↑ 結合') : null;
+
     return el('div', { class: `card ${b.confidence < 0.6 ? 'block unknown' : ''}` }, [
       el('div', { class: 'row wrap', style: 'margin-bottom:8px' }, [
         el('span', { class: 'page-tag' }, `p.${b.page}`),
         typeSelect,
         roleSelect,
+        mergeBtn,
       ]),
       textArea,
     ]);

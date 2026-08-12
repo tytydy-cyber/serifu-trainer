@@ -1,7 +1,7 @@
 import { db, uid } from '../db.js';
 import { el, toast, colorForIndex } from '../ui.js';
 import { extractFromFile, extractFromPlainText, detectEncodingIssue } from '../extract.js';
-import { extractRoleCandidates, extractCastList, classifyScript, buildRawText } from '../parser.js';
+import { extractRoleCandidates, extractCastList, classifyScript, buildRawText, extractInlineDirections } from '../parser.js';
 import { computeAppearances } from '../appearances.js';
 import { computeRevisionDiff } from '../diff.js';
 import { getProgress, carryOverProgress } from '../progress.js';
@@ -459,6 +459,15 @@ export async function renderImport(app) {
         return;
       }
 
+      // A run of flagged rows closer together than CONTEXT (a song's lyrics,
+      // say — every line its own 要確認) has each one fall inside the
+      // previous one's window. That's fine for merging windows to avoid a
+      // repeated context row, but checking "is this the row THIS window was
+      // centered on" for whether to render it editable was wrong: a later
+      // flagged row swallowed into an earlier row's window never got its
+      // own turn as the centered idx, so it silently rendered as read-only
+      // context — exactly the rows a reader most needs the 結合 button on.
+      const flaggedSet = new Set(flaggedIdx);
       let lastShownIdx = -1;
       for (const idx of flaggedIdx) {
         const from = Math.max(0, idx - CONTEXT);
@@ -468,8 +477,8 @@ export async function renderImport(app) {
         }
         const start = Math.max(from, lastShownIdx + 1);
         for (let i = start; i <= to; i++) {
-          if (i === idx) list.appendChild(renderFixRow(state.blocks[i]));
-          else if (i > lastShownIdx) list.appendChild(renderContextRow(state.blocks[i]));
+          if (flaggedSet.has(i)) list.appendChild(renderFixRow(state.blocks[i]));
+          else list.appendChild(renderContextRow(state.blocks[i]));
         }
         lastShownIdx = Math.max(lastShownIdx, to);
       }
@@ -493,11 +502,30 @@ export async function renderImport(app) {
       ]) : null;
       const textArea = el('textarea', { rows: b.text.length > 40 ? 3 : 1, oninput: (e) => { b.text = e.target.value; } }, b.text);
 
+      // A monologue extract.js didn't recognize as column overflow (or a
+      // song's rhythm-spaced lyric lines, which no line-by-line rule can
+      // tell apart from a genuine one-off role cue — see 要確認 review)
+      // shreds into several rows in sequence. Merging one back into its
+      // predecessor is the fast way to put it back together by hand.
+      const idx = state.blocks.indexOf(b);
+      const mergeBtn = idx > 0 ? el('button', {
+        class: 'ghost small',
+        title: '直前の行と結合します',
+        onclick: () => {
+          const prev = state.blocks[idx - 1];
+          prev.text += b.text;
+          if (prev.type === 'line') prev.inlineDirections = extractInlineDirections(prev.text);
+          state.blocks.splice(idx, 1);
+          renderList();
+        },
+      }, '↑ 結合') : null;
+
       return el('div', { class: `card ${b.confidence < 0.6 ? 'block unknown' : ''}` }, [
         el('div', { class: 'row wrap', style: 'margin-bottom:8px' }, [
           el('span', { class: 'page-tag' }, `p.${b.page}`),
           typeSelect,
           roleSelect,
+          mergeBtn,
         ]),
         textArea,
       ]);

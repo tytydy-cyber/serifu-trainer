@@ -328,6 +328,14 @@ export function extractRoleCandidates(pages, castNames = [], options = {}) {
         onlyOnce,
         inCast,
         castName,
+        // No delimiter ever backed this one up — every hit came from Pattern
+        // C, "a short line with no sentence-ending punctuation." That same
+        // rule fires on an ordinary short clause a column break happened to
+        // cut cleanly (worse, a repeated one — a song refrain, a callback
+        // line — reaches Pattern C's count>=2 floor by simple coincidence).
+        // classifyScript needs this to avoid trusting a long candidate with
+        // no other evidence as a real name — see looksLikeFreshSpeaker.
+        weakOnly: c.strong === 0,
         occurrences: c.occurrences,
       };
     })

@@ -431,15 +431,27 @@ const MULTI_ROLE_SEP = /[・／\/＆&]/;
 // (built only from confirmed roles), so matchRoleAndBody can't attribute the
 // line to anyone — but the line is still a fresh speech, not a fragment of
 // whatever came before it, and must not be folded into the previous block.
+//
+// A name the candidate scan never even surfaced at all — one that spoke only
+// once and isn't in the cast list, e.g. a stagehand credited mid-curtain-call
+// ("音響　（メガネ割れたので…）") — obviously isn't in knownNames either. For
+// those, fall back to the same shape the candidate scan itself looks for: a
+// short opening token cut from the rest by a colon, brackets, a tab, or a
+// gap wide enough that extract.js turned it into a space (reconstructPageLines
+// only inserts one at a deliberate typesetting gap, not mid-sentence — see
+// its comment — so this rarely fires on a genuine wrapped continuation).
+// A false split here just leaves an extra 要確認 row to dismiss; a false
+// fold silently corrupts and misattributes two speeches, which is worse.
 function looksLikeFreshSpeaker(line, knownNames) {
-  if (!knownNames || knownNames.size === 0) return false;
   const half = toHalfWidth(line);
-  for (const name of knownNames) {
-    if (!name || !half.startsWith(name)) continue;
-    const rest = half.slice(name.length);
-    if (rest === '' || /^[:：\t]/.test(rest) || /^ *「/.test(rest) || /^ +\S/.test(rest) || /^[…‥]/.test(rest)) return true;
+  if (knownNames) {
+    for (const name of knownNames) {
+      if (!name || !half.startsWith(name)) continue;
+      const rest = half.slice(name.length);
+      if (rest === '' || /^[:：\t]/.test(rest) || /^ *「/.test(rest) || /^ +\S/.test(rest) || /^[…‥]/.test(rest)) return true;
+    }
   }
-  return false;
+  return PATTERN_A.test(line) || PATTERN_B.test(line) || PATTERN_D.test(line) || PATTERN_E.test(line);
 }
 
 // A name inside "A＆B" is often shorter than that role's usual attribution

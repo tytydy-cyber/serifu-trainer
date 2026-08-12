@@ -390,15 +390,10 @@ export async function renderImport(app) {
         // Every name the wizard ever suspected of being a role, whether the
         // reader kept it checked or not — a walk-on part's line still has to
         // be recognized as a fresh speech rather than swallowed into whoever
-        // spoke before it. See looksLikeFreshSpeaker in parser.js. Excludes a
-        // long candidate backed by nothing but Pattern C ("a short line with
-        // no ending punctuation") and no cast match — that rule alone can
-        // just as easily be a repeated line (a refrain, a callback) that a
-        // column break happened to cut at, not a name, and trusting it here
-        // would keep that fragment from ever rejoining its sentence.
-        const knownNames = new Set(
-          state.candidates.filter((c) => !(c.weakOnly && !c.inCast && c.name.length > 6)).map((c) => c.name)
-        );
+        // spoke before it. No candidate is dropped from this set; weakOnly
+        // just tells matchKnownNamePrefix which of them to trust less for
+        // one specific, narrow shape of match — see its comment.
+        const knownNames = new Map(state.candidates.map((c) => [c.name, c.weakOnly]));
         state.blocks = classifyScript(state.pages, rolesForClassify, { frontMatterPages: state.castPages, knownNames });
         go('fix');
       } }, '読み取り結果を見る →'),

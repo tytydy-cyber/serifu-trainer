@@ -434,36 +434,48 @@ function matchRoleAndBody(line, lookup) {
 const MULTI_ROLE_SEP = /[・／\/＆&]/;
 
 // True if `line` opens with one of the names the wizard found while scanning
-// for role candidates — including ones the reader left unchecked (a walk-on
-// part with a single line, say). Those names never made it into `lookup`
-// (built only from confirmed roles), so matchRoleAndBody can't attribute the
-// line to anyone — but the line is still a fresh speech, not a fragment of
-// whatever came before it, and must not be folded into the previous block.
+// for role candidates — every candidate, checked or not: a walk-on part
+// left unchecked (onlyOnce defaults it off, nothing more) is exactly as
+// trustworthy a name here as one the reader confirmed. Those names never
+// made it into `lookup` (built only from confirmed roles), so
+// matchRoleAndBody can't attribute the line to anyone — but the line is
+// still a fresh speech, not a fragment of whatever came before it, and
+// must not be folded into the previous block.
 //
-// A name the candidate scan never even surfaced at all — one that spoke only
-// once and isn't in the cast list, e.g. a stagehand credited mid-curtain-call
-// ("音響　（メガネ割れたので…）") — obviously isn't in knownNames either. For
-// those, fall back to the same shape the candidate scan itself looks for: a
-// short opening token cut from the rest by a colon, brackets, a tab, or a
-// gap wide enough that extract.js turned it into a space (reconstructPageLines
-// only inserts one at a deliberate typesetting gap, not mid-sentence — see
-// its comment — so this rarely fires on a genuine wrapped continuation).
-// A false split here just leaves an extra 要確認 row to dismiss; a false
-// fold silently corrupts and misattributes two speeches, which is worse.
-// If `line` opens with one of `knownNames` followed by a real separator
-// (colon, brackets, a tab, a wide gap, an opening ellipsis), returns the
-// matched name and the rest of the line as body text — the same shape
-// matchRoleAndBody resolves for a *confirmed* role, just without a roleId
-// since this name was never checked into one. Exported so the fix screens
-// can offer "turn this into a role" on a block that landed in 要確認 only
-// because nobody confirmed a name the wizard already knew about.
+// `knownNames` maps name -> weakOnly (no colon/bracket/tab evidence
+// anywhere, every hit came from Pattern C: "a short line with no
+// sentence-ending punctuation"). That flag matters for exactly one branch
+// below: a weak-only candidate matching by being the *entire* current line
+// is circular — Pattern C is what makes short punctuation-less lines
+// candidates in the first place, so of course one matches another the same
+// shape (a song refrain, a mid-sentence fragment a column break happened
+// to cut cleanly). A colon, bracket, tab, or real gap is a separator no
+// coincidence produces, so those stay trusted at any evidence level.
+//
+// A name the candidate scan never even surfaced at all — one that spoke
+// only once and isn't in the cast list, e.g. a stagehand credited
+// mid-curtain-call ("音響　（メガネ割れたので…）") — obviously isn't in
+// knownNames either. For those, fall back to the same shape the candidate
+// scan itself looks for: a short opening token cut from the rest by a
+// colon, brackets, a tab, or a gap wide enough that extract.js turned it
+// into a space (reconstructPageLines only inserts one at a deliberate
+// typesetting gap, not mid-sentence — see its comment — so this rarely
+// fires on a genuine wrapped continuation). A false split here just leaves
+// an extra 要確認 row to dismiss; a false fold silently corrupts and
+// misattributes two speeches, which is worse.
+//
+// Returns the matched name and the rest of the line as body text — the
+// same shape matchRoleAndBody resolves for a *confirmed* role, just
+// without a roleId since this name was never checked into one. Exported so
+// the fix screens can offer "turn this into a role" on a block that landed
+// in 要確認 only because nobody confirmed a name the wizard already knew.
 export function matchKnownNamePrefix(line, knownNames) {
   if (!knownNames) return null;
   const half = toHalfWidth(line);
-  for (const name of knownNames) {
+  for (const [name, weakOnly] of knownNames) {
     if (!name || !half.startsWith(name)) continue;
     const rest = half.slice(name.length);
-    if (rest === '') return { name, body: '' };
+    if (rest === '') { if (!weakOnly) return { name, body: '' }; continue; }
     if (/^[:：\t]/.test(rest)) return { name, body: rest.slice(1).trim() };
     let m = /^ *「(.+)」?\s*$/.exec(rest);
     if (m) return { name, body: m[1].trim() };
@@ -542,7 +554,7 @@ export function extractInlineDirections(text) {
 // confirmedRoles: [{ id, name, aliases }]
 export function classifyScript(pages, confirmedRoles, options = {}) {
   const lookup = buildAliasLookup(confirmedRoles);
-  const knownNames = options.knownNames || new Set();
+  const knownNames = options.knownNames || new Map();
   // Pages the cast list spans (from extractCastList). They are front matter —
   // a column of bare character names, which reads exactly like a run of
   // role-only speech lines and otherwise gets attributed as dialogue.

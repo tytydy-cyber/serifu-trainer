@@ -16,7 +16,15 @@ function parseRoute() {
 
 let currentCleanup = null;
 
+// Remembers how far down each hash was scrolled, so going back to a list
+// (出番一覧 after マスク稽古, say) restores where the reader left off instead
+// of dumping them back at the top. Keyed by the exact hash, so it only ever
+// restores a genuine revisit — any other hash still opens at the top below.
+let lastHash = location.hash;
+const scrollPositions = new Map();
+
 async function route() {
+  scrollPositions.set(lastHash, window.scrollY);
   if (typeof currentCleanup === 'function') {
     try { currentCleanup(); } catch (e) { /* noop */ }
   }
@@ -52,7 +60,8 @@ async function route() {
     app.innerHTML = '';
     app.appendChild(document.createElement('div')).textContent = `エラーが発生しました: ${err.message}`;
   }
-  window.scrollTo(0, 0);
+  lastHash = location.hash;
+  window.scrollTo(0, scrollPositions.get(lastHash) || 0);
 }
 
 // Module scripts execute after the document has been parsed (like <script defer>),

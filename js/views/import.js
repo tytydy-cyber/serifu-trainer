@@ -305,17 +305,32 @@ export async function renderImport(app) {
 
     setFooter([
       el('button', { onclick: () => go('source') }, '← 戻る'),
-      el('button', { class: 'primary', onclick: () => {
+      el('button', { class: 'primary', onclick: async () => {
         const primaryNames = new Set();
         for (const c of state.candidates) {
           const sel = state.selections.get(c.name);
           if (sel.included && sel.primaryName.trim()) primaryNames.add(sel.primaryName.trim());
         }
+        // A revision re-import shouldn't make the reader re-pick their own
+        // role from scratch — carry "自分の役" over from the parent script
+        // for any role that comes back under the same name (or an alias it
+        // used to go by).
+        const mineNames = new Set();
+        if (state.parentScriptId) {
+          const parentRoles = await db.byIndex('roles', 'scriptId', state.parentScriptId);
+          for (const r of parentRoles) {
+            if (!r.isMine) continue;
+            mineNames.add(r.name);
+            for (const a of r.aliases || []) mineNames.add(a);
+          }
+        }
         state.roles = [...primaryNames].map((name, i) => {
           const aliases = state.candidates
             .filter((c) => state.selections.get(c.name).included && state.selections.get(c.name).primaryName.trim() === name)
             .map((c) => c.name);
-          return { tempId: uid('role'), name, aliases: [...new Set(aliases)], isMine: false, color: colorForIndex(i) };
+          const aliasSet = new Set(aliases);
+          const isMine = mineNames.has(name) || [...aliasSet].some((a) => mineNames.has(a));
+          return { tempId: uid('role'), name, aliases: [...aliasSet], isMine, color: colorForIndex(i) };
         });
         if (state.roles.length === 0) { toast('役を1つ以上チェックしてください'); return; }
         go('roleConfirm');

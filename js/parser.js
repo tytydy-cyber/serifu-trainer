@@ -316,16 +316,10 @@ export function extractRoleCandidates(pages, castNames = [], options = {}) {
       // A one-character candidate matches far too easily (any stray particle
       // sits inside some cast entry), so require real recurrence on top.
       if ([...c.name].length <= 1 && c.count < (inCast ? 5 : 10)) defaultInclude = false;
-      // A role that only ever speaks once is easy to include by mistake (a
-      // stray word matched, or a walk-on part not worth tracking progress
-      // for) — still show it, but make the reader opt in rather than out.
-      const onlyOnce = c.count <= 1;
-      if (onlyOnce) defaultInclude = false;
       return {
         name: c.name,
         count: Math.round(c.count * 10) / 10,
         defaultInclude,
-        onlyOnce,
         inCast,
         castName,
         // No delimiter ever backed this one up — every hit came from Pattern
@@ -434,12 +428,12 @@ function matchRoleAndBody(line, lookup) {
 const MULTI_ROLE_SEP = /[・／\/＆&]/;
 
 // True if `line` opens with one of the names the wizard found while scanning
-// for role candidates — every candidate, checked or not: a walk-on part
-// left unchecked (onlyOnce defaults it off, nothing more) is exactly as
-// trustworthy a name here as one the reader confirmed. Those names never
-// made it into `lookup` (built only from confirmed roles), so
-// matchRoleAndBody can't attribute the line to anyone — but the line is
-// still a fresh speech, not a fragment of whatever came before it, and
+// for role candidates — every candidate, checked or not: a walk-on part the
+// reader happened to leave unchecked is exactly as trustworthy a name here
+// as one they confirmed. Those names never made it into `lookup` (built
+// only from confirmed roles), so matchRoleAndBody can't attribute the line
+// to anyone — but the line is still a fresh speech, not a fragment of
+// whatever came before it, and
 // must not be folded into the previous block.
 //
 // `knownNames` maps name -> weakOnly (no colon/bracket/tab evidence

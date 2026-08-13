@@ -272,9 +272,7 @@ export async function renderImport(app) {
         checkbox,
         el('div', { class: 'name' }, [
           el('div', {}, c.name),
-          el('div', { class: 'faint' }, c.onlyOnce
-            ? `セリフ ${c.count} 回　・　1回しか登場しないため既定ではチェックを外しています`
-            : `セリフ ${c.count} 回`),
+          el('div', { class: 'faint' }, `セリフ ${c.count} 回`),
         ]),
         el('span', { class: 'faint' }, '→'),
         nameInput,

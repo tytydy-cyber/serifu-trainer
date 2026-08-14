@@ -1,12 +1,11 @@
 import { db, uid } from '../db.js';
 import { el, toast, colorForIndex } from '../ui.js';
 import { extractFromFile, extractFromPlainText, detectEncodingIssue } from '../extract.js';
-import { extractRoleCandidates, extractCastList, classifyScript, buildRawText, extractInlineDirections } from '../parser.js';
+import { extractRoleCandidates, extractCastList, classifyScript, buildRawText } from '../parser.js';
 import { computeAppearances } from '../appearances.js';
 import { computeRevisionDiff } from '../diff.js';
 import { getProgress, carryOverProgress } from '../progress.js';
-
-const TYPE_LABELS = { heading: '見出し', cue: 'キュー', line: 'セリフ', direction: 'ト書き', unknown: '要確認' };
+import { createBlockFixUI } from './blockFixList.js';
 
 const STEPS = [
   { id: 'source', label: '台本を読み込む' },
@@ -403,191 +402,21 @@ export async function renderImport(app) {
 
   function renderFixStep() {
     const container = el('div', {});
-    const counts = { heading: 0, cue: 0, line: 0, direction: 0, unknown: 0 };
-    for (const b of state.blocks) counts[b.type]++;
 
     container.appendChild(el('p', { class: 'lead' },
       '読み取り結果です。このまま保存しても使えます。おかしな行があれば、種類や役をその場で直せます。'));
     container.appendChild(el('p', { class: 'faint' },
       'ボタンをタップすると、その種類だけに絞り込めます。「要確認」は、役のセリフともト書きとも判断できなかった行で、多くはタイトルや登場人物表など本文以外の部分です。前後の行も薄く表示します。'));
 
-    const countsRow = el('div', { class: 'row wrap' });
+    const { countsRow, list } = createBlockFixUI({
+      getBlocks: () => state.blocks,
+      roles: state.roles,
+      roleIdField: 'tempId',
+      confirmMerge: false, // nothing is saved yet — a wizard-step mistake costs nothing to redo
+      createRole: (name) => ({ tempId: uid('role'), name, aliases: [], isMine: false, color: colorForIndex(state.roles.length) }),
+    });
     container.appendChild(el('div', { class: 'card' }, [countsRow]));
-
-    let typeFilter = counts.unknown > 0 ? 'unknown' : null;
-
-    const list = el('div', { class: 'block-list' });
     container.appendChild(list);
-
-    const CONTEXT = 2; // lines of surrounding context shown around each flagged row
-
-    function isIssue(b) { return b.type === 'unknown' || b.confidence < 0.6; }
-
-    function renderCounts() {
-      countsRow.innerHTML = '';
-      for (const [t, n] of Object.entries(counts)) {
-        countsRow.appendChild(el('button', {
-          class: `badge type-filter-btn ${typeFilter === t ? 'active' : ''}`,
-          onclick: () => { typeFilter = typeFilter === t ? null : t; renderList(); },
-        }, `${TYPE_LABELS[t]} ${n}`));
-      }
-    }
-
-    function renderList() {
-      renderCounts();
-      list.innerHTML = '';
-      if (typeFilter !== 'unknown') {
-        const filtered = typeFilter ? state.blocks.filter((b) => b.type === typeFilter) : state.blocks;
-        filtered.forEach((b) => list.appendChild(renderFixRow(b)));
-        if (list.children.length === 0) {
-          list.appendChild(el('div', { class: 'empty-state' }, typeFilter ? '該当する行はありません。' : '直すべき行はありません。そのまま保存できます。'));
-        }
-        return;
-      }
-
-      const flaggedIdx = [];
-      state.blocks.forEach((b, i) => { if (isIssue(b)) flaggedIdx.push(i); });
-      if (flaggedIdx.length === 0) {
-        list.appendChild(el('div', { class: 'empty-state' }, '直すべき行はありません。そのまま保存できます。'));
-        return;
-      }
-
-      // A run of flagged rows closer together than CONTEXT (a song's lyrics,
-      // say — every line its own 要確認) has each one fall inside the
-      // previous one's window. That's fine for merging windows to avoid a
-      // repeated context row, but checking "is this the row THIS window was
-      // centered on" for whether to render it editable was wrong: a later
-      // flagged row swallowed into an earlier row's window never got its
-      // own turn as the centered idx, so it silently rendered as read-only
-      // context — exactly the rows a reader most needs the 結合 button on.
-      const flaggedSet = new Set(flaggedIdx);
-      let lastShownIdx = -1;
-      for (const idx of flaggedIdx) {
-        const from = Math.max(0, idx - CONTEXT);
-        const to = Math.min(state.blocks.length - 1, idx + CONTEXT);
-        if (lastShownIdx >= 0 && from > lastShownIdx + 1) {
-          list.appendChild(el('div', { class: 'faint', style: 'text-align:center;margin:14px 0' }, '……'));
-        }
-        const start = Math.max(from, lastShownIdx + 1);
-        for (let i = start; i <= to; i++) {
-          if (flaggedSet.has(i)) list.appendChild(renderFixRow(state.blocks[i]));
-          else list.appendChild(renderContextRow(state.blocks[i]));
-        }
-        lastShownIdx = Math.max(lastShownIdx, to);
-      }
-    }
-
-    function renderContextRow(b) {
-      return el('div', { class: 'faint', style: 'padding:6px 12px;font-size:14px;line-height:1.6' }, [
-        el('span', { class: 'page-tag' }, `p.${b.page}　`),
-        el('span', {}, `[${TYPE_LABELS[b.type]}] `),
-        b.text || '（空行）',
-      ]);
-    }
-
-    function renderFixRow(b) {
-      const typeSelect = el('select', { onchange: (e) => { b.type = e.target.value; renderList(); } },
-        Object.entries(TYPE_LABELS).map(([v, label]) => el('option', { value: v, selected: b.type === v }, label))
-      );
-      const roleSelect = b.type === 'line' ? el('select', { onchange: (e) => { b.roleIds = [e.target.value]; } }, [
-        el('option', { value: '', selected: !b.roleIds || !b.roleIds.length }, '（役を選ぶ）'),
-        ...state.roles.map((r) => el('option', { value: r.tempId, selected: !!(b.roleIds && b.roleIds.includes(r.tempId)) }, r.name)),
-      ]) : null;
-      const textArea = el('textarea', { rows: b.text.length > 40 ? 3 : 1, oninput: (e) => { b.text = e.target.value; } }, b.text);
-
-      // A monologue extract.js didn't recognize as column overflow (or a
-      // song's rhythm-spaced lyric lines, which no line-by-line rule can
-      // tell apart from a genuine one-off role cue — see 要確認 review)
-      // shreds into several rows in sequence. Merging one back into its
-      // predecessor is the fast way to put it back together by hand.
-      const idx = state.blocks.indexOf(b);
-      const mergeBtn = idx > 0 ? el('button', {
-        class: 'ghost small',
-        title: '直前の行と結合します',
-        onclick: () => {
-          const prev = state.blocks[idx - 1];
-          prev.text += '\n' + b.text;
-          if (prev.type === 'line') prev.inlineDirections = extractInlineDirections(prev.text);
-          state.blocks.splice(idx, 1);
-          renderList();
-        },
-      }, '↑ 結合') : null;
-
-      // The inverse: a block that's actually two speeches glued together
-      // (auto-folded on a guess that turned out wrong, or wrong before it
-      // ever reached a fix screen — e.g. two names in one cue like
-      // "ヘッドギア男女", which nothing here can split into its own two
-      // roles, but a false "this doesn't look like a fresh speaker" guess
-      // can still be undone by hand). Splits the text at wherever the
-      // cursor sits in the textarea into two blocks; the new one starts out
-      // 要確認 like any other unattributed line.
-      const splitBtn = el('button', {
-        class: 'ghost small',
-        title: 'カーソル位置でこの行を2つに分けます',
-        onclick: () => {
-          const pos = textArea.selectionStart;
-          if (pos <= 0 || pos >= b.text.length) {
-            toast('分けたい位置にカーソルを置いてからタップしてください');
-            return;
-          }
-          const before = b.text.slice(0, pos).replace(/[\n ]+$/, '');
-          const after = b.text.slice(pos).replace(/^[\n ]+/, '');
-          if (!before || !after) { toast('分けたい位置にカーソルを置いてからタップしてください'); return; }
-          b.text = before;
-          const next = state.blocks[idx + 1];
-          const newBlock = {
-            order: next ? (b.order + next.order) / 2 : b.order + 0.5,
-            page: b.page,
-            type: 'unknown',
-            text: after,
-            inlineDirections: [],
-            confidence: 0,
-          };
-          state.blocks.splice(idx + 1, 0, newBlock);
-          renderList();
-        },
-      }, '↓ 分離');
-
-      // This line only sits in 要確認 because nobody checked the box for a
-      // name the candidate scan already found (e.g. a walk-on the reader
-      // left unchecked at 役名を確認) — offer to register it as a role and
-      // attribute the line in one tap instead of retyping the name.
-      const suggestion = b.type === 'unknown' && b.suggestedRoleName ? el('div', { class: 'note ok' }, [
-        el('div', {}, `候補：「${b.suggestedRoleName}」の役かもしれません`),
-        el('button', {
-          class: 'ghost small',
-          style: 'margin-top:6px',
-          onclick: () => {
-            let role = state.roles.find((r) => r.name === b.suggestedRoleName);
-            if (!role) {
-              role = { tempId: uid('role'), name: b.suggestedRoleName, aliases: [], isMine: false, color: colorForIndex(state.roles.length) };
-              state.roles.push(role);
-            }
-            b.type = 'line';
-            b.roleIds = [role.tempId];
-            if (b.suggestedBody && b.suggestedBody.trim()) b.text = b.suggestedBody;
-            b.confidence = 0.9;
-            b.suggestedRoleName = undefined;
-            b.suggestedBody = undefined;
-            renderList();
-          },
-        }, `「${b.suggestedRoleName}」を役にして割り当てる`),
-      ]) : null;
-
-      return el('div', { class: `card ${b.confidence < 0.6 ? 'block unknown' : ''}` }, [
-        suggestion,
-        el('div', { class: 'row wrap', style: 'margin-bottom:8px' }, [
-          el('span', { class: 'page-tag' }, `p.${b.page}`),
-          typeSelect,
-          roleSelect,
-          mergeBtn,
-          splitBtn,
-        ]),
-        textArea,
-      ]);
-    }
-
-    renderList();
     container.appendChild(el('div', { style: 'height:70px' }));
 
     const saveBtn = el('button', { class: 'primary', onclick: async () => {

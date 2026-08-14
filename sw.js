@@ -2,7 +2,7 @@
  * app shell 一式を precache + network-first でオフライン動作させる。
  * SHELL の一覧を変えたら VERSION を上げること（古いキャッシュの掃除のため）。
  */
-const VERSION = 'v1';
+const VERSION = 'v3';
 const SHELL_CACHE = `shell-${VERSION}`;
 
 const base = new URL('./', self.location).href;
@@ -14,11 +14,15 @@ const SHELL = [
   'style.css',
   'manifest.json',
   'register-sw.js',
+  'privacy.html',
+  'guide.html',
   'js/app.js',
   'js/db.js',
   'js/parser.js',
+  'js/extract.js',
   'js/appearances.js',
   'js/progress.js',
+  'js/diff.js',
   'js/tts.js',
   'js/ui.js',
   'js/views/home.js',
@@ -28,6 +32,8 @@ const SHELL = [
   'js/views/sceneNotes.js',
   'js/views/practiceMask.js',
   'js/views/practiceVoice.js',
+  'js/views/reviewBlocks.js',
+  'js/views/blockFixList.js',
   'vendor/pdf.min.js',
   'vendor/pdf.worker.min.js',
   'vendor/mammoth.browser.min.js',

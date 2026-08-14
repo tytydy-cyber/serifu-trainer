@@ -266,30 +266,39 @@ export function extractRoleCandidates(pages, castNames = [], options = {}) {
     if (!line) continue;
     if (HEADING_RE.test(line) || CUE_RE.test(line) || PAREN_FULL_RE.test(line)) continue;
 
+    // A leading decoration mark (♪, a bullet, …) carries no naming
+    // information of its own — classifyScript strips it before every match
+    // it tries later (see its own LEADING_DECOR_RE use), so the candidate
+    // scan has to strip it the same way before every pattern, not just
+    // PATTERN_PAREN, or a decorated line surfaces in the wizard under a name
+    // ("▼太郎") that body matching would never actually produce ("太郎"),
+    // leaving the real speaker unrecognized every time it speaks undecorated.
+    const forMatch = line.replace(LEADING_DECOR_RE, '');
+
     // Checked before the lyric skip below: "(役名)" is a deliberate marker
     // (parens, same tier as a colon or brackets) wherever it appears —
     // including a song line ("♪（全員）…"), which is otherwise indistinguishable
     // from any other lyric fragment and would be skipped outright next.
-    let m = PATTERN_PAREN.exec(line.replace(LEADING_DECOR_RE, ''));
+    let m = PATTERN_PAREN.exec(forMatch);
     if (m) {
       bump(m[1].trim(), 'strong', lineObj.page, line);
       continue;
     }
     if (LYRIC_RE.test(line)) continue;
 
-    m = PATTERN_A.exec(line) || PATTERN_B.exec(line) || PATTERN_D.exec(line);
+    m = PATTERN_A.exec(forMatch) || PATTERN_B.exec(forMatch) || PATTERN_D.exec(forMatch);
     if (m) {
       bump(m[1].trim(), 'strong', lineObj.page, line);
       continue;
     }
-    m = PATTERN_E.exec(line);
+    m = PATTERN_E.exec(forMatch);
     if (m) {
       bump(m[1].trim(), 'weak', lineObj.page, line);
       continue;
     }
     // Pattern C candidate: a short standalone line (role-only line style)
-    if (line.length <= 10 && !/[。、！？.!?]/.test(line)) {
-      bump(line, 'weak', lineObj.page, line);
+    if (forMatch.length <= 10 && !/[。、！？.!?]/.test(forMatch)) {
+      bump(forMatch, 'weak', lineObj.page, line);
     }
   }
 
@@ -471,7 +480,14 @@ export function matchKnownNamePrefix(line, knownNames) {
     const rest = half.slice(name.length);
     if (rest === '') { if (!weakOnly) return { name, body: '' }; continue; }
     if (/^[:：\t]/.test(rest)) return { name, body: rest.slice(1).trim() };
-    let m = /^ *「(.+)」?\s*$/.exec(rest);
+    // Closing-bracket-required tried first: greedy (.+) has to backtrack to
+    // the last 」 in the string, which strips it correctly. Trying the
+    // optional-bracket form first (as this used to) lets (.+) swallow the
+    // 」 whenever one is present, since the engine never needs to backtrack
+    // for an optional group — matchRoleAndBody avoids this the same way.
+    let m = /^ *「(.+)」\s*$/.exec(rest);
+    if (m) return { name, body: m[1].trim() };
+    m = /^ *「(.+)$/.exec(rest);
     if (m) return { name, body: m[1].trim() };
     m = /^ +(\S.*)$/.exec(rest);
     if (m) return { name, body: m[1].trim() };

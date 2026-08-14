@@ -56,8 +56,11 @@ export async function resetProgress(blockIds) {
 export function summarize(progressList) {
   const counts = { unseen: 0, missed: 0, shaky: 0, got: 0 };
   for (const p of progressList) counts[p.status]++;
-  const total = progressList.length || 1;
-  return { counts, total, gotRatio: counts.got / total };
+  // `total` is the real count callers display (home.js/scriptDetail.js show
+  // it as "自分のセリフ N本") — it must not be padded to avoid a division by
+  // zero below, or a script with no lines yet shows "1本" instead of "0本".
+  const total = progressList.length;
+  return { counts, total, gotRatio: total ? counts.got / total : 0 };
 }
 
 // Carries a block's practice history across a revision. An untouched line

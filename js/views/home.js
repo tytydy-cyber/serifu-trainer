@@ -90,6 +90,11 @@ export async function renderHome(app) {
       '「書き出し」で保存しておいた控えファイルを読み込んで、この端末に全データを戻すためのボタンです。台本を追加したいときは、下の「＋ 台本を取り込む」を使ってください。'),
   ]));
 
+  page.appendChild(el('div', { style: 'margin-top:24px;text-align:center;display:flex;gap:16px;justify-content:center' }, [
+    el('a', { href: 'guide.html', class: 'faint', style: 'text-decoration:underline' }, '使い方ガイド'),
+    el('a', { href: 'privacy.html', class: 'faint', style: 'text-decoration:underline' }, 'プライバシーポリシー'),
+  ]));
+
   app.appendChild(el('div', { class: 'fab-row' }, [
     el('button', { class: 'primary', onclick: () => { location.hash = '#/import'; } }, '＋ 台本を取り込む'),
   ]));

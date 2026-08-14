@@ -94,7 +94,7 @@ async function renderAppearancesTab(content, script, blocks, roles, myRoleIds) {
   }
   appearances.sort((a, b) => a.startOrder - b.startOrder);
 
-  if (script.revisionDiff) await renderRevisionDiffCard(content, script, blocks, appearances);
+  if (script.revisionDiff && !script.revisionDiffDismissed) await renderRevisionDiffCard(content, script, blocks, appearances);
 
   if (script.performanceDate) {
     const daysLeft = Math.ceil((script.performanceDate - Date.now()) / 86400000);
@@ -196,8 +196,8 @@ async function renderRevisionDiffCard(content, script, blocks, appearances) {
       if (!newB) continue;
       diffRows.push(el('div', { style: 'border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:8px' }, [
         el('span', { class: 'badge' }, '変更'),
-        el('div', { class: 'faint', style: 'text-decoration:line-through;margin-top:4px' }, oldB ? oldB.text : '（旧テキスト不明）'),
-        el('div', { style: 'margin-top:2px' }, newB.text),
+        el('div', { class: 'faint', style: 'text-decoration:line-through;margin-top:4px;white-space:pre-wrap' }, oldB ? oldB.text : '（旧テキスト不明）'),
+        el('div', { style: 'margin-top:2px;white-space:pre-wrap' }, newB.text),
       ]));
     }
   }
@@ -206,12 +206,28 @@ async function renderRevisionDiffCard(content, script, blocks, appearances) {
     if (!b) continue;
     diffRows.push(el('div', { style: 'border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:8px' }, [
       el('span', { class: 'badge' }, '追加'),
-      el('div', { style: 'margin-top:4px' }, b.text),
+      el('div', { style: 'margin-top:4px;white-space:pre-wrap' }, b.text),
     ]));
   }
 
-  content.appendChild(el('div', { class: 'note ok' }, [
-    el('strong', {}, parent ? `「${parent.title}」からの改訂版です` : '改訂版として取り込まれています'),
+  const card = el('div', { class: 'note ok' }, [
+    el('div', { class: 'spread' }, [
+      el('strong', {}, parent ? `「${parent.title}」からの改訂版です` : '改訂版として取り込まれています'),
+      el('button', {
+        class: 'ghost small',
+        title: 'この表示を閉じる',
+        onclick: async () => {
+          // Dismissal is permanent, not just for this visit — the diff
+          // itself (script.revisionDiff) stays on the script so the changed
+          // lines are still there to inspect from elsewhere, but this
+          // summary card has done its job once acknowledged and shouldn't
+          // come back on every future 出番 tab visit.
+          script.revisionDiffDismissed = true;
+          await db.put('scripts', script);
+          card.remove();
+        },
+      }, '✕'),
+    ]),
     el('div', {}, `変更 ${d.modifiedCount}　・　追加 ${d.addedCount}　・　削除 ${d.deletedCount}　・　変更なし ${d.unchangedCount}`),
     el('div', { class: 'faint', style: 'margin-top:2px' }, '変更のなかったセリフは、以前の稽古記録をそのまま引き継いでいます。変更されたセリフは「怪しい」として登録し直しました。'),
     affected.length ? el('div', { class: 'row wrap', style: 'margin-top:10px' },
@@ -224,7 +240,8 @@ async function renderRevisionDiffCard(content, script, blocks, appearances) {
       el('summary', {}, '変更点の一覧を見る'),
       el('div', { style: 'margin-top:8px' }, diffRows),
     ]) : null,
-  ]));
+  ]);
+  content.appendChild(card);
 }
 
 function renderViewTab(content, script, blocks, roleMap, myRoleIds, focusBlockId) {

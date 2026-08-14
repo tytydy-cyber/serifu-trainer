@@ -147,6 +147,12 @@ button.role-filter-btn.active, button.type-filter-btn.active { background: var(-
 .block {
   padding: 10px 12px; border-radius: 10px; margin-bottom: 6px;
   border-left: 3px solid transparent;
+  /* block.text can hold a real newline — a 結合 merge, or classifyScript's
+     own fold-absorption seam, both join text with '\n' (see parser.js).
+     Without this, the browser's default whitespace handling collapses that
+     newline into a single space, which reads as a stray gap next to
+     full-width Japanese text instead of the line break it actually is. */
+  white-space: pre-wrap;
 }
 .block.heading { text-align: center; color: var(--accent); font-weight: 700; margin: 18px 0 10px; }
 .block.cue { color: var(--text-faint); font-size: 14px; font-style: italic; }
@@ -159,8 +165,13 @@ button.role-filter-btn.active, button.type-filter-btn.active { background: var(-
 .block .inline-dir { color: var(--text-faint); font-size: 0.9em; }
 .block .page-tag { font-size: 11px; color: var(--text-faint); }
 
+/* top must be measured, not guessed (see DESIGN §7) — it sits below
+   whatever sticky stack (topbar + tabs + toolbar) is above it, and that
+   stack's height varies with title/label length. Reuses --scroll-offset,
+   the same measured stack height scroll-margin-top uses below, set by
+   scriptDetail.js's positionTabs() and practiceMask.js's positionToolbar(). */
 .sticky-page-header {
-  position: sticky; top: 49px; z-index: 5;
+  position: sticky; top: var(--scroll-offset, 64px); z-index: 5;
   text-align: center; font-size: 13px; color: var(--text-dim);
   padding: 4px; background: var(--bg);
 }
@@ -276,6 +287,7 @@ button.file-pick {
   font-size: 20px; line-height: 1.9; min-height: 3em;
   letter-spacing: 0.02em;
   overflow-wrap: anywhere;
+  white-space: pre-wrap; /* same reasoning as .block above */
 }
 .hint-row { display: flex; gap: 8px; margin: 10px 0; }
 .hint-row button { flex: 1; }
@@ -290,7 +302,7 @@ button.file-pick {
   text-align: center; padding: 24px; gap: 18px; min-height: 60vh;
 }
 .voice-stage .speaker { font-size: 15px; color: var(--text-dim); }
-.voice-stage .content { font-size: 22px; line-height: 1.9; max-width: 560px; }
+.voice-stage .content { font-size: 22px; line-height: 1.9; max-width: 560px; white-space: pre-wrap; }
 .voice-stage .status-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite; }
 @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
 

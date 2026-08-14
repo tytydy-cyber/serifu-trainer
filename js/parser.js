@@ -709,7 +709,17 @@ export function classifyScript(pages, confirmedRoles, options = {}) {
       const prevBlock = blocks[blocks.length - 1];
       if (block.type === 'unknown' && !looksLikeUnresolvedSpeaker && prevBlock
         && (prevBlock.type === 'line' || prevBlock.type === 'direction' || prevBlock.type === 'heading' || prevBlock.type === 'unknown')) {
-        prevBlock.text += (prevBlock.type === 'heading' ? '　' : '') + block.text;
+        // extract.js's own isContinuation flag is a geometric fact (this
+        // column ran out of room, so the next one is the same speech
+        // wrapping on) — join those with nothing between them, exactly how
+        // the wrap reassembles. A line folded in on softer grounds (it just
+        // doesn't look like a fresh speaker) is a guess, not a fact, so it
+        // keeps a newline at the seam: invisible in the normal reading
+        // views (plain text collapses it to a space) but visible — and a
+        // ready-made split point — in the fix screens' textareas, which
+        // preserve it, for exactly the cases the guess turns out wrong.
+        const seam = block.isContinuation ? '' : prevBlock.type === 'heading' ? '　' : '\n';
+        prevBlock.text += seam + block.text;
         prevBlock.srcEnd = finalSrcEnd;
         if (prevBlock.type === 'line') prevBlock.inlineDirections = extractInlineDirections(prevBlock.text);
         rawParts.push(raw);

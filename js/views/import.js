@@ -506,12 +506,47 @@ export async function renderImport(app) {
         title: '直前の行と結合します',
         onclick: () => {
           const prev = state.blocks[idx - 1];
-          prev.text += b.text;
+          prev.text += '\n' + b.text;
           if (prev.type === 'line') prev.inlineDirections = extractInlineDirections(prev.text);
           state.blocks.splice(idx, 1);
           renderList();
         },
       }, '↑ 結合') : null;
+
+      // The inverse: a block that's actually two speeches glued together
+      // (auto-folded on a guess that turned out wrong, or wrong before it
+      // ever reached a fix screen — e.g. two names in one cue like
+      // "ヘッドギア男女", which nothing here can split into its own two
+      // roles, but a false "this doesn't look like a fresh speaker" guess
+      // can still be undone by hand). Splits the text at wherever the
+      // cursor sits in the textarea into two blocks; the new one starts out
+      // 要確認 like any other unattributed line.
+      const splitBtn = el('button', {
+        class: 'ghost small',
+        title: 'カーソル位置でこの行を2つに分けます',
+        onclick: () => {
+          const pos = textArea.selectionStart;
+          if (pos <= 0 || pos >= b.text.length) {
+            toast('分けたい位置にカーソルを置いてからタップしてください');
+            return;
+          }
+          const before = b.text.slice(0, pos).replace(/[\n ]+$/, '');
+          const after = b.text.slice(pos).replace(/^[\n ]+/, '');
+          if (!before || !after) { toast('分けたい位置にカーソルを置いてからタップしてください'); return; }
+          b.text = before;
+          const next = state.blocks[idx + 1];
+          const newBlock = {
+            order: next ? (b.order + next.order) / 2 : b.order + 0.5,
+            page: b.page,
+            type: 'unknown',
+            text: after,
+            inlineDirections: [],
+            confidence: 0,
+          };
+          state.blocks.splice(idx + 1, 0, newBlock);
+          renderList();
+        },
+      }, '↓ 分離');
 
       // This line only sits in 要確認 because nobody checked the box for a
       // name the candidate scan already found (e.g. a walk-on the reader
@@ -546,6 +581,7 @@ export async function renderImport(app) {
           typeSelect,
           roleSelect,
           mergeBtn,
+          splitBtn,
         ]),
         textArea,
       ]);

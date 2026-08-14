@@ -1,5 +1,5 @@
 import { db, uid } from '../db.js';
-import { el, confirmDialog, colorForIndex } from '../ui.js';
+import { el, confirmDialog, colorForIndex, toast } from '../ui.js';
 import { extractInlineDirections } from '../parser.js';
 import { resetProgress } from '../progress.js';
 
@@ -161,7 +161,7 @@ export async function renderReviewBlocks(app, scriptId) {
       onclick: async () => {
         const prev = blocks[idx - 1];
         if (!(await confirmDialog(`この行を直前の行「${prev.text.slice(0, 20)}${prev.text.length > 20 ? '…' : ''}」に結合します。元に戻せません。よろしいですか？`))) return;
-        prev.text += b.text;
+        prev.text += '\n' + b.text;
         if (prev.type === 'line') prev.inlineDirections = extractInlineDirections(prev.text);
         await db.put('blocks', prev);
         await db.delete('blocks', b.id);
@@ -171,6 +171,45 @@ export async function renderReviewBlocks(app, scriptId) {
         renderList();
       },
     }, '↑ 結合') : null;
+
+    // The inverse: a block that's actually two speeches glued together
+    // (auto-folded on a guess that turned out wrong — or wrong before it
+    // ever reached a fix screen, e.g. two names in one cue like "ヘッドギ
+    // ア男女", which nothing here can split into its own two roles, but a
+    // false "this doesn't look like a fresh speaker" guess can still be
+    // undone by hand). Splits at wherever the cursor sits in the textarea;
+    // the new block starts out 要確認 like any other unattributed line.
+    const splitBtn = el('button', {
+      class: 'ghost small',
+      title: 'カーソル位置でこの行を2つに分けます',
+      onclick: async () => {
+        const pos = textArea.selectionStart;
+        if (pos <= 0 || pos >= b.text.length) {
+          toast('分けたい位置にカーソルを置いてからタップしてください');
+          return;
+        }
+        const before = b.text.slice(0, pos).replace(/[\n ]+$/, '');
+        const after = b.text.slice(pos).replace(/^[\n ]+/, '');
+        if (!before || !after) { toast('分けたい位置にカーソルを置いてからタップしてください'); return; }
+        b.text = before;
+        const next = blocks[idx + 1];
+        const newBlock = {
+          id: uid('block'),
+          scriptId: script.id,
+          order: next ? (b.order + next.order) / 2 : b.order + 0.5,
+          page: b.page,
+          type: 'unknown',
+          text: after,
+          inlineDirections: [],
+          confidence: 0,
+        };
+        await db.put('blocks', b);
+        await db.put('blocks', newBlock);
+        blocks.splice(idx + 1, 0, newBlock);
+        await invalidateAppearancesOnce();
+        renderList();
+      },
+    }, '↓ 分離');
 
     // This line only sits in 要確認 because nobody checked the box for a
     // name the candidate scan already found (e.g. a walk-on the reader left
@@ -208,6 +247,7 @@ export async function renderReviewBlocks(app, scriptId) {
         typeSelect,
         roleSelect,
         mergeBtn,
+        splitBtn,
       ]),
       textArea,
     ]);

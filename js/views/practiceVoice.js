@@ -98,7 +98,7 @@ export async function renderPracticeVoice(app, scriptId, appearanceIndex) {
   function setControls() {
     controls.innerHTML = '';
     controls.style.display = 'flex';
-    controls.appendChild(el('button', { onclick: () => { paused = !paused; pauseBtn.textContent = paused ? '▶ 再開' : '⏸ 一時停止'; if (!paused) engine.cancel(); } }, '⏸ 一時停止'));
+    controls.appendChild(el('button', { onclick: () => { paused = !paused; pauseBtn.textContent = paused ? '▶ 再開' : '⏸ 一時停止'; if (paused) engine.cancel(); } }, '⏸ 一時停止'));
     controls.appendChild(el('button', { onclick: () => { skipRequested = true; engine.cancel(); } }, '次へ'));
     controls.appendChild(el('button', { class: 'danger', onclick: () => { stopped = true; engine.cancel(); location.hash = `#/script/${encodeURIComponent(scriptId)}/appearances`; } }, '中断'));
     var pauseBtn = controls.children[0];
@@ -131,10 +131,10 @@ export async function renderPracticeVoice(app, scriptId, appearanceIndex) {
     try { await engine.speak(block.text, { rate: 1.05, pitch: 0.9 }); } catch (e) {}
   }
 
-  function playMyLine(block) {
+  function playMyLine(block, { isRetry = false } = {}) {
     return new Promise((resolve) => {
       stage.innerHTML = '';
-      stage.appendChild(el('div', { class: 'speaker' }, `${speakerLabel(block)}（あなた）`));
+      stage.appendChild(el('div', { class: 'speaker' }, `${speakerLabel(block)}（あなた）${isRetry ? '　再挑戦' : ''}`));
       const contentEl = el('div', { class: 'content' }, '・・・');
       stage.appendChild(contentEl);
       stage.appendChild(el('div', { class: 'faint' }, 'セリフを言ってみましょう。タップで答えを表示します。'));
@@ -178,7 +178,7 @@ export async function renderPracticeVoice(app, scriptId, appearanceIndex) {
       async function finish(result) {
         results[result]++;
         await recordResult(block.id, result);
-        resolve();
+        resolve(result);
       }
     });
   }
@@ -186,6 +186,11 @@ export async function renderPracticeVoice(app, scriptId, appearanceIndex) {
   async function startPractice() {
     startBtn.remove();
     setControls();
+    // A line judged 出なかった goes back into the same session's queue
+    // instead of just moving on — DESIGN §5-3 treats "same-session retry" as
+    // the point of that judgment. Drained after the main run-through, so a
+    // miss gets asked again before the session ends.
+    const retryQueue = [];
     for (cursor = 0; cursor < rangeBlocks.length; cursor++) {
       if (stopped) return;
       await waitWhilePaused();
@@ -197,10 +202,21 @@ export async function renderPracticeVoice(app, scriptId, appearanceIndex) {
         continue;
       }
       if (isMine(block)) {
-        await playMyLine(block);
+        const result = await playMyLine(block);
+        if (result === 'missed') retryQueue.push(block);
       } else {
         await playOtherLine(block);
       }
+      if (!skipRequested) await new Promise((r) => setTimeout(r, 250));
+    }
+    while (retryQueue.length > 0) {
+      if (stopped) return;
+      await waitWhilePaused();
+      if (stopped) return;
+      skipRequested = false;
+      const block = retryQueue.shift();
+      const result = await playMyLine(block, { isRetry: true });
+      if (result === 'missed') retryQueue.push(block);
       if (!skipRequested) await new Promise((r) => setTimeout(r, 250));
     }
     if (!stopped) showComplete();

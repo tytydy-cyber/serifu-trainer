@@ -94,10 +94,14 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
 
   // Same reasoning as scriptDetail's positionTabs: the topbar's height isn't
   // fixed (a long appearance label wraps), so the toolbar's stick point has
-  // to be measured rather than guessed.
+  // to be measured rather than guessed. --scroll-offset is the same stack
+  // height, one level further down — it's what style.css's
+  // .sticky-page-header reads for its own top, so the p.◯ marker sticks
+  // below this toolbar instead of colliding with it.
   const positionToolbar = () => {
     const toolbar = wholeArea.querySelector('.sticky-toolbar');
     if (toolbar) toolbar.style.top = `${topbar.offsetHeight}px`;
+    wholeArea.style.setProperty('--scroll-offset', `${topbar.offsetHeight + (toolbar ? toolbar.offsetHeight : 0)}px`);
   };
   window.addEventListener('resize', positionToolbar);
 
@@ -105,6 +109,13 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
   let contextBlocks = [];
   const results = { got: 0, shaky: 0, missed: 0 };
   let hintLevel = 0;
+  // A line judged 出なかった goes back into the same session's queue instead
+  // of just moving on — DESIGN §5-3 treats "same-session retry" as the point
+  // of that judgment, not merely a label recorded for later. Drained after
+  // the main pass, so a miss is asked again before the session ends rather
+  // than only living on as a future Leitner review.
+  let retryQueue = [];
+  const lastResult = new Map(); // blockId -> latest judgment, for progress display across retries
 
   function isMine(b) {
     return b.type === 'line' && b.roleIds && b.roleIds.some((r) => myRoleIds.has(r));
@@ -116,6 +127,12 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
       cursor++;
     }
     if (cursor >= rangeBlocks.length) {
+      if (retryQueue.length > 0) {
+        const block = retryQueue.shift();
+        hintLevel = 0;
+        renderTarget(block, { isRetry: true });
+        return;
+      }
       renderComplete();
       return;
     }
@@ -129,7 +146,7 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
     contextArea.scrollTop = contextArea.scrollHeight;
   }
 
-  function renderTarget(block) {
+  function renderTarget(block, { isRetry = false } = {}) {
     renderContext();
     targetArea.innerHTML = '';
     const roleNames = (block.roleIds || []).map((rid) => roleMap.get(rid)?.name || '?').join('・');
@@ -157,8 +174,13 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
 
     function updateJudgeButtons() {
       // Hints past 一文 already show most of the line, so claiming "言えた"
-      // at that point would not mean much — same rule as before.
-      gotBtn.disabled = hintLevel >= 3 && !revealed;
+      // at that point would not mean much — same rule as before. This must
+      // not depend on `revealed`: tapping 怪しい/出なかった also sets
+      // revealed=true on its first (reveal-only) tap, and re-evaluating with
+      // `&& !revealed` at that point would flip gotBtn back on even though
+      // the hint level never went down — reopening 言えた after the reader
+      // had already been shut out of it.
+      gotBtn.disabled = hintLevel >= 3;
       gotBtn.title = gotBtn.disabled ? 'ヒントを多く使ったため選べません' : '';
     }
     updateJudgeButtons();
@@ -176,18 +198,26 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
       }
       results[result]++;
       await recordResult(block.id, result);
+      lastResult.set(block.id, result);
+      if (result === 'missed') retryQueue.push(block);
       contextBlocks.push(block);
       cursor++;
       step();
     }
 
-    const myTotal = rangeBlocks.filter(isMine).length;
-    const myDone = rangeBlocks.slice(0, cursor).filter(isMine).length;
+    // Retries change how many blocks get rendered but not how many distinct
+    // lines exist, so progress counts distinct blocks not yet settled on a
+    // non-missed judgment — a plain cursor position would run past myTotal
+    // once a retry pass starts (cursor already sits at rangeBlocks.length).
+    const myBlockIds = rangeBlocks.filter(isMine).map((b) => b.id);
+    const myTotal = myBlockIds.length;
+    const myDone = myBlockIds.filter((id) => lastResult.get(id) && lastResult.get(id) !== 'missed').length;
 
     targetArea.appendChild(el('div', { class: 'spread', style: 'margin-bottom:6px' }, [
       el('div', { class: 'role-name', style: 'margin:0' }, [
         el('span', { class: 'dot', style: `background:${roleMap.get(block.roleIds[0])?.color || '#888'}` }),
         roleNames,
+        isRetry ? el('span', { class: 'badge' }, '再挑戦') : null,
       ]),
       el('div', { class: 'row', style: 'gap:6px' }, [
         el('span', { class: 'faint' }, `p.${block.page} ・ ${myDone + 1}/${myTotal}`),
@@ -216,7 +246,7 @@ export async function renderPracticeMask(app, scriptId, appearanceIndex) {
         el('span', { class: 'faint' }, `全 ${total} 台詞`),
       ]),
       el('div', { class: 'row' }, [
-        el('button', { class: 'primary', onclick: () => { cursor = 0; contextBlocks = []; results.got = 0; results.shaky = 0; results.missed = 0; step(); } }, 'もう一度'),
+        el('button', { class: 'primary', onclick: () => { cursor = 0; contextBlocks = []; retryQueue = []; lastResult.clear(); results.got = 0; results.shaky = 0; results.missed = 0; step(); } }, 'もう一度'),
         el('button', { onclick: () => { location.hash = `#/script/${encodeURIComponent(scriptId)}/appearances`; } }, '出番一覧へ'),
       ]),
     ]));

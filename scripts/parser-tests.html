@@ -1,0 +1,124 @@
+<!doctype html>
+<!--
+  Regression tests for js/parser.js's classification rules — dev tool only,
+  not linked from index.html and not part of the shipped app. There's no
+  build/test framework in this project (see DESIGN.md's "ビルドしない"
+  decision), so this runs directly in the browser against the real module.
+
+  Open via the preview server, e.g. http://localhost:8765/scripts/parser-tests.html
+
+  Add a case here whenever a 要確認 misclassification gets fixed, so the
+  next rule change can be checked against every previously-fixed case in
+  one pass instead of re-testing each by hand.
+-->
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>parser.js regression tests</title>
+  <style>
+    body { font-family: monospace; background: #15141a; color: #ece9f2; padding: 20px; }
+    .pass { color: #4caf7d; }
+    .fail { color: #d9604a; }
+    .case { margin-bottom: 10px; padding: 10px; border: 1px solid #34313f; border-radius: 8px; }
+    .error { color: #d9a441; white-space: pre-wrap; margin-top: 6px; }
+    #summary { font-size: 18px; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div id="summary">running…</div>
+  <div id="results"></div>
+
+  <script type="module">
+    import * as parser from '../js/parser.js';
+
+    const tests = [];
+    function test(name, fn) { tests.push({ name, fn }); }
+
+    function assertEqual(actual, expected, msg) {
+      const a = JSON.stringify(actual);
+      const e = JSON.stringify(expected);
+      if (a !== e) throw new Error(`${msg ? msg + ': ' : ''}expected ${e}, got ${a}`);
+    }
+
+    function makeRoles(names) {
+      return names.map((name, i) => ({ id: `r${i}`, name, aliases: [] }));
+    }
+    function blockSummary(b, roles) {
+      const roleMap = new Map(roles.map((r) => [r.id, r.name]));
+      return {
+        type: b.type,
+        text: b.text,
+        role: b.roleIds ? b.roleIds.map((id) => roleMap.get(id)).join('・') : undefined,
+      };
+    }
+
+    // --- regression cases ---------------------------------------------
+
+    test('一同: 折り返し誤判定で直前行に吸収されない', () => {
+      const roles = makeRoles(['太郎']);
+      const knownNames = new Map([['一同', true]]);
+      const pages = [{ pageNumber: 1, lines: [
+        { text: '太郎：おまえら、道草食ってないで帰れ' },
+        { text: '一同　（口々に）はい', lineRole: 'continuation' },
+      ] }];
+      const blocks = parser.classifyScript(pages, roles, { knownNames });
+      assertEqual(blocks.length, 2, 'block count');
+      assertEqual(blockSummary(blocks[0], roles), { type: 'line', text: 'おまえら、道草食ってないで帰れ', role: '太郎' });
+      assertEqual(blocks[1].type, 'unknown', 'second block type');
+      assertEqual(blocks[1].suggestedRoleName, '一同', 'suggestion');
+    });
+
+    test('本物の折り返し継続はそのまま結合される（上のケースの対照）', () => {
+      const roles = makeRoles(['太郎']);
+      const pages = [{ pageNumber: 1, lines: [
+        { text: '太郎：長いセリフがここから始まって' },
+        { text: 'そのまま次の列に折り返しただけの続き', lineRole: 'continuation' },
+      ] }];
+      const blocks = parser.classifyScript(pages, roles, {});
+      assertEqual(blocks.length, 1, 'block count');
+      assertEqual(blocks[0].text, '長いセリフがここから始まってそのまま次の列に折り返しただけの続き');
+    });
+
+    test('装飾記号: ▼付き役名も剥がされて候補になる', () => {
+      const pages = [{ pageNumber: 1, lines: [
+        { text: '▼太郎 おはよう' },
+        { text: '▼太郎 今日はいい天気だ' },
+      ] }];
+      const { candidates } = parser.extractRoleCandidates(pages, [], {});
+      const names = candidates.map((c) => c.name);
+      if (!names.includes('太郎')) throw new Error('expected 太郎 candidate, got ' + JSON.stringify(names));
+      if (names.includes('▼太郎')) throw new Error('unexpected ▼太郎 leaking through undecorated');
+    });
+
+    test('matchKnownNamePrefix: 閉じ括弧を本文に取り込まない', () => {
+      const knownNames = new Map([['受付', false]]);
+      const res = parser.matchKnownNamePrefix('受付「いらっしゃいませ」', knownNames);
+      assertEqual(res, { name: '受付', body: 'いらっしゃいませ' });
+    });
+
+    test('matchKnownNamePrefix: 閉じない鉤括弧（折り返し）も本文として拾う', () => {
+      const knownNames = new Map([['受付', false]]);
+      const res = parser.matchKnownNamePrefix('受付「いらっしゃいま', knownNames);
+      assertEqual(res, { name: '受付', body: 'いらっしゃいま' });
+    });
+
+    // --- runner ----------------------------------------------------------
+
+    const resultsEl = document.getElementById('results');
+    let passCount = 0;
+    for (const { name, fn } of tests) {
+      const div = document.createElement('div');
+      div.className = 'case';
+      try {
+        fn();
+        passCount++;
+        div.innerHTML = `<span class="pass">✓ PASS</span> — ${name}`;
+      } catch (e) {
+        div.innerHTML = `<span class="fail">✗ FAIL</span> — ${name}<div class="error">${e.message}</div>`;
+      }
+      resultsEl.appendChild(div);
+    }
+    document.getElementById('summary').textContent = `${passCount} / ${tests.length} passed`;
+  </script>
+</body>
+</html>

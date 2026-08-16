@@ -712,8 +712,18 @@ export function classifyScript(pages, confirmedRoles, options = {}) {
       // unrecognized-speaker fragment and would otherwise shred into one
       // stray unknown row per column instead of staying one legible,
       // fixable 要確認 block — worse for the reader than fewer, longer ones.
-      const looksLikeUnresolvedSpeaker = !block.isContinuation
-        && (MULTI_ROLE_SEP.test(line.slice(0, 6)) || looksLikeFreshSpeaker(line, knownNames));
+      //
+      // Deliberately NOT gated on `!block.isContinuation`: the
+      // continuesPrevious branch above only overrides extract.js's
+      // continuation guess for a *confirmed* role (matchRoleAndBody against
+      // `lookup`), not for a known-but-unconfirmed candidate or a bare
+      // name-shaped line the way looksLikeFreshSpeaker checks here. Without
+      // this, extract.js misjudging a column as "full" (a coincidence, not
+      // a real overflow — see its own comment) silently swallowed a fresh
+      // speaker like "一同　（口々に）はい" into whatever came before it,
+      // with no separator and no 要確認 row to catch it.
+      const looksLikeUnresolvedSpeaker =
+        MULTI_ROLE_SEP.test(line.slice(0, 6)) || looksLikeFreshSpeaker(line, knownNames);
       // Unlike the generic shape check, a knownNames match names an actual
       // candidate — surface it so the fix screens can offer "make 受付 a
       // role and assign this line to them" instead of leaving the reader to

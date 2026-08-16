@@ -1,0 +1,122 @@
+<!doctype html>
+<!--
+  Regression tests for js/views/blockFixList.js — dev tool only, not linked
+  from index.html. Open via the preview server, e.g.
+  http://localhost:8765/scripts/blockfix-tests.html
+
+  Unlike parser-tests.html this exercises real DOM (createBlockFixUI renders
+  actual elements and wires real event listeners), so tests dispatch a click
+  and wait a tick for the async handler to settle.
+-->
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>blockFixList.js regression tests</title>
+  <style>
+    body { font-family: monospace; background: #15141a; color: #ece9f2; padding: 20px; }
+    .pass { color: #4caf7d; }
+    .fail { color: #d9604a; }
+    .case { margin-bottom: 10px; padding: 10px; border: 1px solid #34313f; border-radius: 8px; }
+    .error { color: #d9a441; white-space: pre-wrap; margin-top: 6px; }
+    #summary { font-size: 18px; margin-bottom: 16px; }
+    #sandbox { display: none; } /* rows render for real but stay off-screen */
+  </style>
+</head>
+<body>
+  <div id="summary">running…</div>
+  <div id="results"></div>
+  <div id="sandbox"></div>
+
+  <script type="module">
+    import { createBlockFixUI } from '../js/views/blockFixList.js';
+
+    const tests = [];
+    function test(name, fn) { tests.push({ name, fn }); }
+
+    function assertEqual(actual, expected, msg) {
+      const a = JSON.stringify(actual);
+      const e = JSON.stringify(expected);
+      if (a !== e) throw new Error(`${msg ? msg + ': ' : ''}expected ${e}, got ${a}`);
+    }
+
+    async function clickSuggestion(ui, text) {
+      const note = [...ui.list.querySelectorAll('.note.ok')].find((n) => n.textContent.includes(text));
+      if (!note) throw new Error(`suggestion note containing "${text}" not found`);
+      const btn = note.querySelector('button');
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 30)); // let the async onclick settle
+    }
+
+    // --- regression cases ---------------------------------------------
+
+    test('別の父: 一件のサジェストを確定すると他の一致行もまとめて割り当たる', async () => {
+      const blocks = [
+        { id: 'b1', type: 'unknown', text: '別の父 （キングの空き容器を取り）何日かにいっぺん', suggestedRoleName: '別の父', suggestedBody: '（キングの空き容器を取り）何日かにいっぺん', confidence: 0 },
+        { id: 'b2', type: 'unknown', text: '別の父 いいか麺太郎。これは壊れたプリンタに', suggestedRoleName: '別の父', suggestedBody: 'いいか麺太郎。これは壊れたプリンタに', confidence: 0 },
+        { id: 'b3', type: 'unknown', text: '別の父 ラーメン屋。客に本物のラーメンを食わせる店だ。母さんを探せ麺太郎', suggestedRoleName: '別の父', suggestedBody: 'ラーメン屋。客に本物のラーメンを食わせる店だ。母さんを探せ麺太郎', confidence: 0 },
+        { id: 'b4', type: 'unknown', text: '無関係の一行', confidence: 0 },
+      ];
+      const roles = [];
+      const ui = createBlockFixUI({
+        getBlocks: () => blocks,
+        roles,
+        roleIdField: 'id',
+        createRole: (name) => ({ id: 'r_new', name, aliases: [], isMine: false, color: '#fff' }),
+      });
+      document.getElementById('sandbox').appendChild(ui.list);
+
+      await clickSuggestion(ui, '別の父');
+
+      assertEqual(roles.length, 1, 'role created exactly once');
+      for (const b of [blocks[0], blocks[1], blocks[2]]) {
+        assertEqual(b.type, 'line', `${b.id} type`);
+        assertEqual(b.roleIds, ['r_new'], `${b.id} roleIds`);
+        assertEqual(b.suggestedRoleName, undefined, `${b.id} suggestion cleared`);
+      }
+      assertEqual(blocks[0].text, '（キングの空き容器を取り）何日かにいっぺん', 'b1 text stripped of name prefix');
+      assertEqual(blocks[2].text, 'ラーメン屋。客に本物のラーメンを食わせる店だ。母さんを探せ麺太郎', 'b3 text stripped of name prefix');
+      assertEqual(blocks[3].type, 'unknown', 'unrelated block left alone');
+    });
+
+    test('既存の役の追加サジェストでも同じ役IDにまとめて割り当たる（新規作成しない）', async () => {
+      const blocks = [
+        { id: 'b1', type: 'unknown', text: '花子 おかえりなさい', suggestedRoleName: '花子', suggestedBody: 'おかえりなさい', confidence: 0 },
+        { id: 'b2', type: 'unknown', text: '花子 ごはんできてるよ', suggestedRoleName: '花子', suggestedBody: 'ごはんできてるよ', confidence: 0 },
+      ];
+      const roles = [{ id: 'r_existing', name: '花子', aliases: [], isMine: false, color: '#fff' }];
+      let createCalled = false;
+      const ui = createBlockFixUI({
+        getBlocks: () => blocks,
+        roles,
+        roleIdField: 'id',
+        createRole: (name) => { createCalled = true; return { id: 'r_new', name, aliases: [], isMine: false, color: '#fff' }; },
+      });
+      document.getElementById('sandbox').appendChild(ui.list);
+
+      await clickSuggestion(ui, '花子');
+
+      if (createCalled) throw new Error('createRole should not be called for an already-registered role');
+      assertEqual(blocks[0].roleIds, ['r_existing'], 'b1 uses existing role id');
+      assertEqual(blocks[1].roleIds, ['r_existing'], 'b2 uses existing role id');
+    });
+
+    // --- runner ----------------------------------------------------------
+
+    const resultsEl = document.getElementById('results');
+    let passCount = 0;
+    for (const { name, fn } of tests) {
+      const div = document.createElement('div');
+      div.className = 'case';
+      try {
+        await fn();
+        passCount++;
+        div.innerHTML = `<span class="pass">✓ PASS</span> — ${name}`;
+      } catch (e) {
+        div.innerHTML = `<span class="fail">✗ FAIL</span> — ${name}<div class="error">${e.message}\n${e.stack || ''}</div>`;
+      }
+      resultsEl.appendChild(div);
+    }
+    document.getElementById('summary').textContent = `${passCount} / ${tests.length} passed`;
+  </script>
+</body>
+</html>

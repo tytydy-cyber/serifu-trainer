@@ -1,5 +1,5 @@
 import { el, toast, confirmDialog } from '../ui.js';
-import { extractInlineDirections } from '../parser.js';
+import { extractInlineDirections, matchKnownNamePrefix } from '../parser.js';
 
 // Shared by the import wizard's 仕上げ step (in-memory state, nothing
 // persisted until 保存) and the post-save 分類を見直す screen (every edit
@@ -234,13 +234,28 @@ export function createBlockFixUI(options) {
             role = await createRole(b.suggestedRoleName);
             roles.push(role);
           }
-          b.type = 'line';
-          b.roleIds = [role[roleIdField]];
-          if (b.suggestedBody && b.suggestedBody.trim()) b.text = b.suggestedBody;
-          b.confidence = 0.9;
-          b.suggestedRoleName = undefined;
-          b.suggestedBody = undefined;
-          await onBlockChanged(b);
+          // A walk-on part that speaks more than once shows up as one
+          // 要確認 row per line, all with the same suggestion — re-tapping
+          // this button for every occurrence is exactly the busywork it
+          // exists to avoid. Once the name is confirmed, sweep every other
+          // 要確認 row for the same opening name and attribute it too,
+          // instead of only the row that was actually tapped.
+          const nameLookup = new Map([[role.name, false]]);
+          let count = 0;
+          for (const candidate of getBlocks()) {
+            if (candidate.type !== 'unknown') continue;
+            const known = matchKnownNamePrefix(candidate.text, nameLookup);
+            if (!known) continue;
+            candidate.type = 'line';
+            candidate.roleIds = [role[roleIdField]];
+            if (known.body && known.body.trim()) candidate.text = known.body;
+            candidate.confidence = 0.9;
+            candidate.suggestedRoleName = undefined;
+            candidate.suggestedBody = undefined;
+            await onBlockChanged(candidate);
+            count++;
+          }
+          if (count > 1) toast(`「${role.name}」を役にして、一致する${count}件のセリフをまとめて割り当てました`);
           await onStructureChanged();
           renderList();
         },

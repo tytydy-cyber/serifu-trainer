@@ -102,6 +102,51 @@
       assertEqual(res, { name: '受付', body: 'いらっしゃいま' });
     });
 
+    // PATTERN_E（役名␣本文）が省略記号・句点混じりの言いよどみを役名と誤認し、
+    // 地の文への自動結合を止めていた3件（ユーザー報告）。
+    test('①「ッ…… （ずっと泣いてる）」: 直前のセリフに結合される（margin, 改行あり）', () => {
+      const roles = makeRoles(['太郎']);
+      const pages = [{ pageNumber: 1, lines: [
+        { text: '太郎：もう、やめてくれよ' },
+        { text: 'ッ…… （ずっと泣いてる）' },
+      ] }];
+      const blocks = parser.classifyScript(pages, roles, {});
+      assertEqual(blocks.length, 1, 'block count');
+      assertEqual(blocks[0].text, 'もう、やめてくれよ\nッ…… （ずっと泣いてる）');
+    });
+
+    test('②「…… 、あれは…」: 直前のセリフに結合される（改行不要・折り返し継続）', () => {
+      const roles = makeRoles(['太郎']);
+      const pages = [{ pageNumber: 1, lines: [
+        { text: '太郎：あの人は誰なんだろう' },
+        { text: '…… 、あれはどう見ても宗教関係のかたがただよ。巨人のスカウトではないよ', lineRole: 'continuation' },
+      ] }];
+      const blocks = parser.classifyScript(pages, roles, {});
+      assertEqual(blocks.length, 1, 'block count');
+      assertEqual(blocks[0].text, 'あの人は誰なんだろう…… 、あれはどう見ても宗教関係のかたがただよ。巨人のスカウトではないよ');
+    });
+
+    test('③「葉分かるか。…… うなぎ…」: 直前のセリフに結合される（改行不要・折り返し継続）', () => {
+      const roles = makeRoles(['太郎']);
+      const pages = [{ pageNumber: 1, lines: [
+        { text: '太郎：この言' },
+        { text: '葉分かるか。…… うなぎ、うまい。刺身、うまい。焼肉、うまい。でも、こういうものだって、うまい', lineRole: 'continuation' },
+      ] }];
+      const blocks = parser.classifyScript(pages, roles, {});
+      assertEqual(blocks.length, 1, 'block count');
+      assertEqual(blocks[0].text, 'この言葉分かるか。…… うなぎ、うまい。刺身、うまい。焼肉、うまい。でも、こういうものだって、うまい');
+    });
+
+    test('PATTERN_E: 句読点・省略記号を含まない本物の名前らしき形は今まで通り拾う', () => {
+      const pages = [{ pageNumber: 1, lines: [
+        { text: '花子 おはよう' },
+        { text: '花子 今日はいい天気だね' },
+      ] }];
+      const { candidates } = parser.extractRoleCandidates(pages, [], {});
+      const names = candidates.map((c) => c.name);
+      if (!names.includes('花子')) throw new Error('expected 花子 candidate, got ' + JSON.stringify(names));
+    });
+
     // --- runner ----------------------------------------------------------
 
     const resultsEl = document.getElementById('results');
